@@ -1,5 +1,8 @@
 # Shorts Scout — YouTube Shorts research extension
 
+> **Google Chrome extension** (Manifest V3).
+> Private repo: https://github.com/lman80/shorts-scout-chrome-extension
+
 A Chrome extension for YouTube Shorts creators. While you watch shorts in your
 browser, click one button to see:
 
