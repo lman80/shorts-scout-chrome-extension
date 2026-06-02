@@ -1,0 +1,104 @@
+<!DOCTYPE html>
+<html>
+  <head>
+    <meta charset="utf-8" />
+    <title>Shorts Scout — Settings</title>
+    <style>
+      body {
+        font: 14px/1.5 Roboto, Arial, sans-serif;
+        background: #0f0f0f;
+        color: #f1f1f1;
+        margin: 0;
+        padding: 22px;
+        width: 360px;
+      }
+      h1 {
+        font-size: 16px;
+        margin: 0 0 4px;
+      }
+      p {
+        color: #c9c9c9;
+        margin: 6px 0;
+      }
+      label {
+        display: block;
+        margin: 14px 0 6px;
+        font-weight: 600;
+      }
+      input[type="text"] {
+        width: 100%;
+        box-sizing: border-box;
+        padding: 9px 10px;
+        background: #1c1c1c;
+        border: 1px solid #303030;
+        border-radius: 8px;
+        color: #fff;
+        font-size: 13px;
+      }
+      button {
+        margin-top: 14px;
+        padding: 9px 16px;
+        background: #ff0033;
+        color: #fff;
+        border: none;
+        border-radius: 8px;
+        font-weight: 600;
+        cursor: pointer;
+      }
+      button:hover {
+        background: #d4002b;
+      }
+      .ok {
+        color: #5cd65c;
+        margin-left: 10px;
+      }
+      a {
+        color: #3ea6ff;
+      }
+      .hint {
+        font-size: 12px;
+        color: #9a9a9a;
+      }
+      ol {
+        padding-left: 18px;
+        color: #c9c9c9;
+        font-size: 12px;
+      }
+    </style>
+  </head>
+  <body>
+    <h1>Shorts Scout settings</h1>
+    <p class="hint">
+      Stored only in your browser (chrome.storage.sync). Never sent anywhere
+      except Google's YouTube Data API.
+    </p>
+
+    <label for="apiKey">YouTube Data API v3 key</label>
+    <input id="apiKey" type="text" placeholder="AIza…" autocomplete="off" />
+
+    <label for="thresholds">View thresholds to count (comma-separated)</label>
+    <input id="thresholds" type="text" placeholder="1000000, 10000000" />
+    <p class="hint">e.g. <code>1000000, 10000000</code> counts videos over 1M and 10M.</p>
+
+    <label style="display: flex; align-items: center; gap: 8px; cursor: pointer">
+      <input id="autoShow" type="checkbox" style="width: auto" />
+      Auto-show short &amp; channel views (no click needed)
+    </label>
+    <p class="hint">Uses ~2 API units per short. Turn off to only fetch on Analyze.</p>
+
+    <div>
+      <button id="save">Save</button><span id="status" class="ok"></span>
+    </div>
+
+    <hr style="border-color: #303030; margin: 18px 0" />
+    <p style="font-weight: 600">How to get a free API key</p>
+    <ol>
+      <li>Go to <a href="https://console.cloud.google.com/" target="_blank">console.cloud.google.com</a> and create a project.</li>
+      <li>APIs &amp; Services → Library → enable <b>YouTube Data API v3</b>.</li>
+      <li>APIs &amp; Services → Credentials → Create credentials → API key.</li>
+      <li>Copy it here and Save. (Optionally restrict the key to the YouTube Data API.)</li>
+    </ol>
+
+    <script src="options.js"></script>
+  </body>
+</html>

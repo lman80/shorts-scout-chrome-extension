@@ -1,0 +1,342 @@
+/* ---- Dock: Analyze button, next to YouTube's action column ----------------- */
+#ssct-dock {
+  position: fixed;
+  z-index: 2147483647;
+  display: none; /* toggled to flex when on a short */
+  flex-direction: column;
+  align-items: center;
+  gap: 8px;
+}
+
+#ssct-btn {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 48px;
+  height: 48px;
+  padding: 0;
+  background: #ff0033;
+  color: #fff;
+  border: none;
+  border-radius: 50%;
+  cursor: pointer;
+  box-shadow: 0 2px 10px rgba(0, 0, 0, 0.4);
+  transition: transform 0.08s ease, background 0.15s ease;
+}
+#ssct-btn:hover {
+  background: #d4002b;
+}
+#ssct-btn:active {
+  transform: scale(0.92);
+}
+#ssct-btn .ssct-btn-ico {
+  font-size: 20px;
+  line-height: 1;
+}
+
+/* ---- Results panel -------------------------------------------------------- */
+#ssct-panel {
+  position: fixed;
+  right: 24px;
+  top: 80px;
+  z-index: 2147483647;
+  width: 320px;
+  max-height: calc(100vh - 100px);
+  overflow-y: auto;
+  background: #0f0f0f;
+  color: #f1f1f1;
+  border: 1px solid #2a2a2a;
+  border-radius: 16px;
+  font: 13px/1.4 Roboto, Arial, sans-serif;
+  box-shadow: 0 12px 36px rgba(0, 0, 0, 0.55);
+}
+
+#ssct-panel .ssct-head {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  padding: 12px 16px;
+  font-weight: 700;
+  border-bottom: 1px solid #242424;
+  position: sticky;
+  top: 0;
+  background: #0f0f0f;
+}
+#ssct-panel .ssct-title {
+  font-size: 13px;
+  letter-spacing: 0.02em;
+}
+#ssct-panel .ssct-close {
+  background: transparent;
+  border: none;
+  color: #888;
+  cursor: pointer;
+  font-size: 14px;
+  line-height: 1;
+}
+#ssct-panel .ssct-close:hover {
+  color: #fff;
+}
+
+#ssct-panel .ssct-body {
+  padding: 16px;
+}
+
+/* Hero: the short's view count, front and center */
+#ssct-panel .ssct-hero {
+  text-align: center;
+  margin-bottom: 14px;
+}
+#ssct-panel .ssct-hero-num {
+  font-size: 34px;
+  font-weight: 800;
+  line-height: 1.05;
+  font-variant-numeric: tabular-nums;
+}
+#ssct-panel .ssct-hero-label {
+  font-size: 11px;
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+  color: #9a9a9a;
+  margin-top: 2px;
+}
+#ssct-panel .ssct-hero-sub {
+  font-size: 12px;
+  color: #c9c9c9;
+  margin-top: 6px;
+}
+
+/* Status / progress while scanning */
+#ssct-panel .ssct-status {
+  text-align: center;
+  color: #ffd24d;
+  font-size: 12px;
+  margin-top: 4px;
+}
+#ssct-panel .ssct-pct {
+  color: #fff;
+  font-weight: 700;
+}
+
+/* Milestone chips: "X over 1M", "Y over 10M" */
+#ssct-panel .ssct-chips {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 8px;
+  margin-bottom: 14px;
+}
+#ssct-panel .ssct-chip {
+  background: #1b1b1b;
+  border: 1px solid #2a2a2a;
+  border-radius: 10px;
+  padding: 8px 6px;
+  text-align: center;
+}
+#ssct-panel .ssct-chip b {
+  display: block;
+  font-size: 18px;
+  font-weight: 800;
+  color: #fff;
+  font-variant-numeric: tabular-nums;
+}
+#ssct-panel .ssct-chip span {
+  font-size: 10.5px;
+  color: #9a9a9a;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+}
+
+/* Channel name + stat grid */
+#ssct-panel .ssct-channel-name {
+  font-size: 13px;
+  font-weight: 700;
+  color: #fff;
+  margin: 2px 0 8px;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+#ssct-panel .ssct-grid {
+  display: grid;
+  grid-template-columns: 1fr 1fr 1fr;
+  gap: 8px 6px;
+}
+#ssct-panel .ssct-stat {
+  background: #161616;
+  border-radius: 9px;
+  padding: 8px 4px;
+  text-align: center;
+}
+#ssct-panel .ssct-stat b {
+  display: block;
+  font-size: 14px;
+  font-weight: 700;
+  color: #fff;
+  font-variant-numeric: tabular-nums;
+}
+#ssct-panel .ssct-stat span {
+  font-size: 10px;
+  color: #8f8f8f;
+}
+
+/* Recent shorts grid */
+#ssct-panel .ssct-section-row {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  margin: 16px 0 8px;
+}
+#ssct-panel .ssct-section-label {
+  font-size: 11px;
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+  color: #9a9a9a;
+}
+#ssct-panel .ssct-shortstab {
+  font-size: 11px;
+  color: #3ea6ff;
+  text-decoration: none;
+}
+#ssct-panel .ssct-shortstab:hover {
+  text-decoration: underline;
+}
+#ssct-panel .ssct-vids {
+  display: grid;
+  grid-template-columns: repeat(2, 1fr);
+  gap: 12px;
+}
+#ssct-panel .ssct-vid {
+  text-decoration: none;
+  color: #c9c9c9;
+  display: flex;
+  flex-direction: column;
+}
+#ssct-panel .ssct-thumb {
+  position: relative;
+  display: block;
+  width: 100%;
+  padding-top: 130%; /* vertical, short-shaped */
+  background-size: cover;
+  background-position: center;
+  background-color: #1b1b1b;
+  border-radius: 10px;
+  overflow: hidden;
+}
+#ssct-panel .ssct-vviews {
+  position: absolute;
+  left: 5px;
+  bottom: 5px;
+  background: rgba(0, 0, 0, 0.8);
+  color: #fff;
+  font-size: 11px;
+  font-weight: 700;
+  padding: 2px 6px;
+  border-radius: 6px;
+  font-variant-numeric: tabular-nums;
+}
+#ssct-panel .ssct-vtitle {
+  display: -webkit-box;
+  -webkit-line-clamp: 2;
+  -webkit-box-orient: vertical;
+  overflow: hidden;
+  font-size: 12px;
+  line-height: 1.3;
+  color: #e8e8e8;
+  margin-top: 6px;
+}
+#ssct-panel .ssct-vago {
+  display: block;
+  font-size: 11px;
+  color: #9a9a9a;
+  margin-top: 3px;
+}
+#ssct-panel .ssct-vid:hover .ssct-thumb {
+  outline: 2px solid #3ea6ff;
+  outline-offset: -2px;
+}
+
+#ssct-panel .ssct-muted {
+  color: #9a9a9a;
+}
+#ssct-panel .ssct-note {
+  font-size: 11px;
+  margin-top: 10px;
+}
+#ssct-panel .ssct-warn {
+  color: #ff7a7a;
+  font-weight: 600;
+}
+#ssct-panel .ssct-link {
+  display: block;
+  text-align: center;
+  margin-top: 14px;
+  padding: 8px;
+  background: #1b1b1b;
+  border-radius: 9px;
+  color: #3ea6ff;
+  text-decoration: none;
+  font-weight: 600;
+}
+#ssct-panel .ssct-link:hover {
+  background: #222;
+}
+
+/* Copy / Open channel buttons on the medium (auto) card */
+#ssct-panel .ssct-actions {
+  display: flex;
+  gap: 8px;
+  margin-top: 14px;
+}
+#ssct-panel .ssct-act {
+  flex: 1;
+  padding: 9px 6px;
+  background: #1b1b1b;
+  border: 1px solid #2a2a2a;
+  color: #f1f1f1;
+  border-radius: 9px;
+  font: 600 11.5px/1.2 Roboto, Arial, sans-serif;
+  cursor: pointer;
+}
+#ssct-panel .ssct-act:hover {
+  background: #242424;
+  border-color: #3a3a3a;
+}
+#ssct-panel .ssct-act-ok {
+  color: #5cd65c;
+  border-color: #2e7d32;
+}
+
+/* Opt-in "Count videos over 1M/10M" button (triggers the full scan) */
+#ssct-panel .ssct-count {
+  display: block;
+  width: 100%;
+  margin-top: 14px;
+  padding: 10px;
+  background: transparent;
+  color: #f1f1f1;
+  border: 1px solid #3a3a3a;
+  border-radius: 10px;
+  font: 600 12.5px/1 Roboto, Arial, sans-serif;
+  cursor: pointer;
+}
+#ssct-panel .ssct-count:hover {
+  background: #1b1b1b;
+  border-color: #555;
+}
+
+/* Primary action button on the medium (auto) card */
+#ssct-panel .ssct-scan {
+  display: block;
+  width: 100%;
+  margin-top: 14px;
+  padding: 11px;
+  background: #ff0033;
+  color: #fff;
+  border: none;
+  border-radius: 10px;
+  font: 600 13px/1 Roboto, Arial, sans-serif;
+  cursor: pointer;
+}
+#ssct-panel .ssct-scan:hover {
+  background: #d4002b;
+}
