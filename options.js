@@ -1,3 +1,7 @@
+document.getElementById("openBoard").addEventListener("click", () => {
+  chrome.tabs.create({ url: chrome.runtime.getURL("watchlist.html") });
+});
+
 const keyInput = document.getElementById("apiKey");
 const thrInput = document.getElementById("thresholds");
 const autoInput = document.getElementById("autoShow");

@@ -12,8 +12,31 @@ browser, click one button to see:
 - **Upload activity** — when they last uploaded and how often they post (e.g. `4/wk`)
 - **Top video** — the channel's highest-viewed upload
 
+Save any channel with **☆ Save**, then organize everything on the **Watchlist board**.
+
 The Analyze button is a round 📊 icon that parks itself right next to YouTube's own
 like/comment/share column, so it's where your eyes already are.
+
+## Watchlist board
+Open it from the toolbar icon → **⤢ Open Watchlist Board** (or the ★ in the panel header).
+It's a niche board for deciding what to make:
+
+- **Columns = niches** (3D Printing, Art, Clipping…). Drag channel cards between them,
+  or use the niche dropdown on each card.
+- **Headline metric = avg views / video** (total views ÷ video count) — the signal for a
+  low-effort, repeatable, high-payoff format. Top performers get a 🔥.
+- **Reach / video** = avg views per video ÷ subscribers. Above `1×` means the content
+  escapes the subscriber base — the algorithm-virality signal.
+- **Pipeline status** per channel: Top Candidate / Watching / Testing / Done.
+- **Notes** and pinned **example shorts** per channel.
+- **Board or Table view**, search, sort, and a **Refresh** button that re-pulls live stats
+  + avatars from the API (cheap: ~1 unit per 50 channels).
+- **▶ Review drawer** — watch a channel's shorts in an embedded vertical player *inside*
+  the page (side drawer), flip through with prev/next or the thumbnail strip, and assign a
+  niche with one click. "Next unsorted channel →" lets you blitz-categorize. (YouTube blocks
+  embedding its full shorts *page*, so this embeds the individual shorts as players instead.)
+- **⬇ Export** — download a readable Markdown backup of the whole board (niche tables, stats,
+  notes, examples) with a lossless JSON appendix an AI can reconstruct from.
 
 Everything is **on-demand** — nothing calls the API until you click **📊 Analyze short**,
 so you stay well under the free daily quota.

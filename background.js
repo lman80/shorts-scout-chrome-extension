@@ -63,12 +63,15 @@ async function getChannel(channelId, apiKey) {
   );
   const item = data.items?.[0];
   if (!item) throw new Error("Channel not found.");
+  const thumbs = item.snippet?.thumbnails || {};
   return {
     channelId,
     title: item.snippet?.title || "",
     totalViews: Number(item.statistics?.viewCount || 0),
     subscribers: Number(item.statistics?.subscriberCount || 0),
     videoCount: Number(item.statistics?.videoCount || 0),
+    thumb: (thumbs.medium || thumbs.default || {}).url || "",
+    customUrl: item.snippet?.customUrl || "",
     uploadsPlaylist: item.contentDetails?.relatedPlaylists?.uploads,
   };
 }
@@ -197,7 +200,7 @@ async function scanChannelVideos(channelId, apiKey, onProgress) {
 
 // Cheap: just the newest page of uploads (1 playlistItems + 1 videos call = 2 units).
 // Enough for the recent-shorts grid + last-upload + cadence — no full channel walk.
-async function fetchRecentUploads(channel, apiKey, maxItems = 24) {
+async function fetchRecentUploads(channel, apiKey, maxItems = 50) {
   const page = await apiGet(
     "playlistItems",
     { part: "contentDetails", playlistId: channel.uploadsPlaylist, maxResults: 50 },
@@ -237,9 +240,9 @@ async function fetchRecentUploads(channel, apiKey, maxItems = 24) {
 }
 
 chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
-  // Open a short / the channel's Shorts tab in a background tab (no API key needed).
+  // Open a URL in a new tab (background by default; foreground if msg.active).
   if (msg.type === "OPEN_TAB") {
-    chrome.tabs.create({ url: msg.url, active: false });
+    chrome.tabs.create({ url: msg.url, active: !!msg.active });
     sendResponse({ ok: true });
     return; // synchronous
   }
@@ -254,6 +257,34 @@ chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
         const video = await getVideo(msg.videoId, apiKey);
         const channel = await getChannelCached(video.channelId, apiKey);
         sendResponse({ ok: true, video, channel });
+        return;
+      }
+
+      if (msg.type === "REFRESH_CHANNELS") {
+        // Re-fetch current stats + avatars for saved channels. channels.list takes
+        // up to 50 ids per call (1 unit each), so this is very cheap.
+        const ids = msg.ids || [];
+        const out = {};
+        for (let i = 0; i < ids.length; i += 50) {
+          const batch = ids.slice(i, i + 50);
+          const data = await apiGet(
+            "channels",
+            { part: "statistics,snippet", id: batch.join(",") },
+            apiKey
+          );
+          for (const item of data.items || []) {
+            const t = item.snippet?.thumbnails || {};
+            out[item.id] = {
+              title: item.snippet?.title || "",
+              totalViews: Number(item.statistics?.viewCount || 0),
+              subscribers: Number(item.statistics?.subscriberCount || 0),
+              videoCount: Number(item.statistics?.videoCount || 0),
+              thumb: (t.medium || t.default || {}).url || "",
+              customUrl: item.snippet?.customUrl || "",
+            };
+          }
+        }
+        sendResponse({ ok: true, channels: out });
         return;
       }
 

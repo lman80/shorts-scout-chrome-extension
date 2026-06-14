@@ -8,6 +8,27 @@
   let lastVideo = null;
   let lastQuick = null; // { video, channel } from the cheap auto fetch
   let autoShow = true; // toggled from settings
+  let watchlist = []; // saved channels, mirrored from chrome.storage.local
+  let niches = []; // niche column names, mirrored from storage
+  let savedVideos = []; // individually saved shorts, mirrored from storage
+  let collapsed = false; // when true, the panel stays hidden until reopened via the dock button
+  let tags = []; // available tag names, mirrored from storage
+  let madeBy = [];
+  let madeFor = [];
+  let languages = [];
+  const DEFAULT_TAGS = ["family", "child", "brain rot", "skits", "relatable"];
+  const DEFAULT_MADE_BY = ["children", "teenagers", "adults", "families"];
+  const DEFAULT_MADE_FOR = ["babies", "children", "teenagers", "adults"];
+  const DEFAULT_LANGUAGES = ["English", "Spanish", "Hindi", "Portuguese", "Arabic", "Indonesian", "Japanese", "Korean", "Russian", "French", "German", "Chinese", "Turkish", "Vietnamese", "Italian", "Thai"];
+  const SHEET_DIMS = [
+    { field: "tags", label: "Tags" },
+    { field: "madeBy", label: "Made by" },
+    { field: "madeFor", label: "Made for" },
+    { field: "languages", label: "Language" },
+  ];
+  function dimList(field) {
+    return field === "tags" ? tags : field === "madeBy" ? madeBy : field === "madeFor" ? madeFor : languages;
+  }
 
   // ---- helpers ---------------------------------------------------------------
 
@@ -67,8 +88,12 @@
     return String(s || "").replace(/"/g, "&quot;").replace(/</g, "&lt;");
   }
 
-  function openTab(url) {
-    chrome.runtime.sendMessage({ type: "OPEN_TAB", url });
+  function openTab(url, active) {
+    chrome.runtime.sendMessage({ type: "OPEN_TAB", url, active: !!active });
+  }
+
+  function openBoard() {
+    openTab(chrome.runtime.getURL("watchlist.html"), true);
   }
 
   async function copyText(text) {
@@ -166,19 +191,30 @@
 
   // ---- panel shell -----------------------------------------------------------
 
-  function wireClose() {
+  function collapsePanel() {
+    collapsed = true;
+    chrome.storage.local.set({ panelCollapsed: true });
+    panel.style.display = "none";
+  }
+
+  function wireHeader() {
     const c = panel.querySelector(".ssct-close");
-    if (c) c.onclick = () => (panel.style.display = "none");
+    if (c) c.onclick = collapsePanel;
+    const w = panel.querySelector(".ssct-watch-open");
+    if (w) w.onclick = () => renderWatchlist();
   }
 
   function shell(inner) {
     panel.innerHTML = `
       <div class="ssct-head">
         <span class="ssct-title">Shorts Scout</span>
-        <button class="ssct-close" type="button" aria-label="Close">✕</button>
+        <div class="ssct-head-right">
+          <button class="ssct-watch-open" type="button" title="Open watchlist">★ <span class="ssct-watch-count">${watchlist.length}</span></button>
+          <button class="ssct-close" type="button" aria-label="Collapse" title="Collapse — stays hidden until you reopen with the 📊 button">✕</button>
+        </div>
       </div>
       <div class="ssct-body">${inner}</div>`;
-    wireClose();
+    wireHeader();
   }
 
   function heroHtml(video) {
@@ -198,8 +234,114 @@
 
   // ---- MEDIUM state (auto, cheap) -------------------------------------------
 
-  // Wire the Copy / Open channel buttons (shared by medium + recent views).
-  function wireChannelActions(channelUrl) {
+  // ---- watchlist (saved channels) -------------------------------------------
+
+  function inWatchlist(channelId) {
+    return watchlist.some((w) => w.channelId === channelId);
+  }
+
+  function saveWatchlist() {
+    chrome.storage.local.set({ watchlist });
+  }
+
+  function toggleWatch(channel) {
+    const i = watchlist.findIndex((w) => w.channelId === channel.channelId);
+    if (i >= 0) {
+      watchlist.splice(i, 1);
+    } else {
+      watchlist.push({
+        channelId: channel.channelId,
+        title: channel.title || "",
+        totalViews: channel.totalViews,
+        subscribers: channel.subscribers,
+        videoCount: channel.videoCount,
+        thumb: channel.thumb || "",
+        customUrl: channel.customUrl || "",
+        addedAt: Date.now(),
+        refreshedAt: Date.now(),
+      });
+    }
+    saveWatchlist();
+  }
+
+  function updateWatchCount() {
+    const c = panel.querySelector(".ssct-watch-count");
+    if (c) c.textContent = watchlist.length;
+  }
+
+  function renderWatchlist() {
+    const items = watchlist.slice().sort((a, b) => b.addedAt - a.addedAt);
+    const rows = items.length
+      ? items
+          .map(
+            (w) => `
+        <div class="ssct-wl-item">
+          <div class="ssct-wl-info">
+            <div class="ssct-wl-title">${esc(w.title) || "Channel"}</div>
+            <div class="ssct-wl-sub">${compact(w.subscribers)} subs · ${compact(
+              w.totalViews
+            )} views</div>
+          </div>
+          <div class="ssct-wl-btns">
+            <button class="ssct-wl-btn" data-open="${w.channelId}" title="Open channel">↗</button>
+            <button class="ssct-wl-btn" data-remove="${w.channelId}" title="Remove">✕</button>
+          </div>
+        </div>`
+          )
+          .join("")
+      : `<p class="ssct-muted">No channels saved yet. Tap ☆ Save on a channel to add it here.</p>`;
+
+    shell(`
+      <div class="ssct-wl-head">
+        <button class="ssct-wl-back" type="button">← Back</button>
+        <span class="ssct-section-label">Watchlist · ${items.length}</span>
+        <button class="ssct-wl-board" type="button" title="Open the full niche board">⤢ Board</button>
+      </div>
+      <div class="ssct-wl-list">${rows}</div>
+    `);
+
+    const board = panel.querySelector(".ssct-wl-board");
+    if (board) board.onclick = () => openBoard();
+    const back = panel.querySelector(".ssct-wl-back");
+    if (back)
+      back.onclick = () => {
+        if (lastQuick) renderQuick(lastQuick.video, lastQuick.channel);
+        else panel.style.display = "none";
+      };
+    panel.querySelectorAll("[data-open]").forEach((b) => {
+      b.onclick = () =>
+        openTab(`https://www.youtube.com/channel/${b.dataset.open}`);
+    });
+    panel.querySelectorAll("[data-remove]").forEach((b) => {
+      b.onclick = () => {
+        const i = watchlist.findIndex((w) => w.channelId === b.dataset.remove);
+        if (i >= 0) {
+          watchlist.splice(i, 1);
+          saveWatchlist();
+        }
+        renderWatchlist();
+      };
+    });
+    panel.style.display = "block";
+  }
+
+  // ---- channel action buttons (copy / open / save) --------------------------
+
+  function channelActionsHtml(channel) {
+    const saved = inWatchlist(channel.channelId);
+    return `
+      <div class="ssct-actions">
+        <button class="ssct-act" type="button" data-act="copy">📋 Copy URL</button>
+        <button class="ssct-act" type="button" data-act="open">↗ Open</button>
+        <button class="ssct-act ${
+          saved ? "ssct-act-saved" : ""
+        }" type="button" data-act="star">${saved ? "★ Saved" : "☆ Save"}</button>
+      </div>`;
+  }
+
+  function wireChannelActions(channel) {
+    const channelUrl = `https://www.youtube.com/channel/${channel.channelId}`;
+
     const open = panel.querySelector('[data-act="open"]');
     if (open) open.onclick = () => openTab(channelUrl);
 
@@ -216,14 +358,252 @@
         }, 1300);
       };
     }
+
+    const star = panel.querySelector('[data-act="star"]');
+    if (star) star.onclick = () => openSaveSheet(channel);
   }
 
-  function channelActionsHtml() {
-    return `
-      <div class="ssct-actions">
-        <button class="ssct-act" type="button" data-act="copy">📋 Copy channel URL</button>
-        <button class="ssct-act" type="button" data-act="open">↗ Open channel</button>
-      </div>`;
+  // ---- save sheets (niche / status / notes when saving) ---------------------
+
+  function chipRow(items, selected, attr) {
+    return items
+      .map(
+        (it) =>
+          `<button class="ssct-chip2${it.value === selected ? " on" : ""}" data-${attr}="${esc(it.value)}">${esc(it.label)}</button>`
+      )
+      .join("");
+  }
+
+  function openSaveSheet(channel, draft) {
+    const existing = watchlist.find((w) => w.channelId === channel.channelId);
+    const d = draft || {};
+    let selNiches = d.niches !== undefined ? d.niches.slice() : existing ? (existing.niches || (existing.niche ? [existing.niche] : [])).slice() : [];
+    const notesVal = d.notes !== undefined ? d.notes : existing ? existing.notes : "";
+
+    // Selected values per dimension.
+    const sel = {};
+    SHEET_DIMS.forEach((dim) => {
+      let init = d[dim.field] !== undefined ? d[dim.field] : existing ? existing[dim.field] : undefined;
+      if (dim.field === "tags" && !init && existing && existing.status) init = [existing.status];
+      sel[dim.field] = (init || []).slice();
+    });
+
+    const nicheChipsHtml = niches.map((n) => `<button class="ssct-chip2${selNiches.includes(n) ? " on" : ""}" data-niche="${esc(n)}">${esc(n)}</button>`).join("");
+    const dimBtns = SHEET_DIMS.map(
+      (dim) => `<button class="msd-btn" type="button" data-field="${dim.field}">${dim.label}<span class="msd-count" data-cnt="${dim.field}">${sel[dim.field].length || ""}</span><span class="msd-caret">▾</span></button>`
+    ).join("");
+
+    shell(`
+      <div class="ssct-sheet">
+        <div class="ssct-sheet-title">${existing ? "Edit saved channel" : "Save channel"}</div>
+        <div class="ssct-channel-name">${esc(channel.title) || "Channel"}</div>
+        <div class="ssct-label">Niches <span style="text-transform:none;letter-spacing:0;color:#777">— select any</span></div>
+        <div class="ssct-chips2" data-group="niche">${nicheChipsHtml}<button class="ssct-chip2 new" data-newniche>＋ New</button></div>
+        <div class="ssct-label">Labels</div>
+        <div class="msd-wrap"><div class="msd-row">${dimBtns}</div><div class="msd-panel"></div></div>
+        <div class="ssct-label">Notes</div>
+        <textarea class="ssct-sheet-notes" placeholder="What's the format? Why does it work?">${esc(notesVal)}</textarea>
+        <div class="ssct-sheet-btns">
+          <button class="ssct-sheet-save">${existing ? "Update" : "★ Save"}</button>
+          ${existing ? '<button class="ssct-sheet-remove">Remove</button>' : ""}
+          <button class="ssct-sheet-cancel">Cancel</button>
+        </div>
+      </div>`);
+    panel.style.display = "block";
+
+    const getNotes = () => panel.querySelector(".ssct-sheet-notes").value;
+    const reopenDraft = () => ({ niches: selNiches, ...sel, notes: getNotes() });
+
+    const nicheWrap = panel.querySelector('[data-group="niche"]');
+    nicheWrap.querySelectorAll("[data-niche]").forEach((b) => {
+      b.onclick = () => {
+        const n = b.dataset.niche;
+        const i = selNiches.indexOf(n);
+        if (i >= 0) selNiches.splice(i, 1);
+        else selNiches.push(n);
+        b.classList.toggle("on");
+      };
+    });
+    nicheWrap.querySelector("[data-newniche]").onclick = () => {
+      const name = (prompt("New niche name:") || "").trim();
+      if (!name) return;
+      if (!niches.includes(name)) {
+        niches.push(name);
+        chrome.storage.local.set({ niches });
+      }
+      if (!selNiches.includes(name)) selNiches.push(name);
+      openSaveSheet(channel, reopenDraft());
+    };
+
+    // Compact label dropdowns: a row of buttons, each reveals its options inline below.
+    const msdPanel = panel.querySelector(".msd-panel");
+    const renderDimPanel = (field) => {
+      const dim = SHEET_DIMS.find((d) => d.field === field);
+      msdPanel.innerHTML =
+        dimList(field).map((v) => `<button class="ssct-chip2${sel[field].includes(v) ? " on" : ""}" data-val="${esc(v)}">${esc(v)}</button>`).join("") +
+        `<button class="ssct-chip2 new" data-newval>＋ New</button>`;
+      const setCount = () => {
+        const badge = panel.querySelector(`[data-cnt="${field}"]`);
+        if (badge) badge.textContent = sel[field].length || "";
+      };
+      msdPanel.querySelectorAll("[data-val]").forEach((b) => {
+        b.onclick = () => {
+          const v = b.dataset.val;
+          const i = sel[field].indexOf(v);
+          if (i >= 0) sel[field].splice(i, 1);
+          else sel[field].push(v);
+          b.classList.toggle("on");
+          setCount();
+        };
+      });
+      msdPanel.querySelector("[data-newval]").onclick = () => {
+        const name = (prompt(`New ${dim.label} option:`) || "").trim();
+        if (!name) return;
+        const arr = dimList(field);
+        if (!arr.includes(name)) {
+          arr.push(name);
+          chrome.storage.local.set({ [field]: arr });
+        }
+        if (!sel[field].includes(name)) sel[field].push(name);
+        renderDimPanel(field);
+        setCount();
+      };
+    };
+    panel.querySelectorAll(".msd-btn").forEach((btn) => {
+      btn.onclick = () => {
+        const active = btn.classList.contains("active");
+        panel.querySelectorAll(".msd-btn").forEach((b) => b.classList.remove("active"));
+        if (active) {
+          msdPanel.classList.remove("open");
+          msdPanel.innerHTML = "";
+          return;
+        }
+        btn.classList.add("active");
+        msdPanel.classList.add("open");
+        renderDimPanel(btn.dataset.field);
+      };
+    });
+
+    panel.querySelector(".ssct-sheet-save").onclick = () => saveChannelEntry(channel, selNiches, sel, getNotes());
+    panel.querySelector(".ssct-sheet-cancel").onclick = () => renderQuick((lastQuick && lastQuick.video) || null, channel);
+    const rm = panel.querySelector(".ssct-sheet-remove");
+    if (rm)
+      rm.onclick = () => {
+        const i = watchlist.findIndex((w) => w.channelId === channel.channelId);
+        if (i >= 0) {
+          watchlist.splice(i, 1);
+          saveWatchlist();
+          updateWatchCount();
+        }
+        renderQuick((lastQuick && lastQuick.video) || null, channel);
+      };
+  }
+
+  function saveChannelEntry(channel, nichesArr, labels, notes) {
+    let e = watchlist.find((w) => w.channelId === channel.channelId);
+    if (!e) {
+      e = {
+        channelId: channel.channelId,
+        title: channel.title || "",
+        totalViews: channel.totalViews,
+        subscribers: channel.subscribers,
+        videoCount: channel.videoCount,
+        thumb: channel.thumb || "",
+        customUrl: channel.customUrl || "",
+        addedAt: Date.now(),
+        refreshedAt: Date.now(),
+        examples: [],
+      };
+      watchlist.push(e);
+    }
+    e.niches = nichesArr || [];
+    e.tags = labels.tags || [];
+    e.madeBy = labels.madeBy || [];
+    e.madeFor = labels.madeFor || [];
+    e.languages = labels.languages || [];
+    e.notes = notes;
+    saveWatchlist();
+    updateWatchCount();
+    renderQuick((lastQuick && lastQuick.video) || null, channel);
+  }
+
+  // Save a single short (with notes), independent of saving the channel.
+  function openVideoSheet(video, channel) {
+    if (!video || !video.videoId) return;
+    const existing = savedVideos.find((v) => v.videoId === video.videoId);
+    let selNiche = existing ? existing.niche : "";
+    const notesVal = existing ? existing.notes : "";
+    const nicheItems = [{ value: "", label: "Unsorted" }].concat(niches.map((n) => ({ value: n, label: n })));
+
+    shell(`
+      <div class="ssct-sheet">
+        <div class="ssct-sheet-title">${existing ? "Edit saved short" : "Save this short"}</div>
+        <div class="ssct-channel-name">${esc(video.title) || "Short"}</div>
+        <div class="ssct-muted" style="font-size:12px;margin-bottom:8px">${esc(channel && channel.title) || ""} · ${compact(video.views)} views</div>
+        <div class="ssct-label">Niche</div>
+        <div class="ssct-chips2" data-group="niche">${chipRow(nicheItems, selNiche, "niche")}<button class="ssct-chip2 new" data-newniche>＋ New</button></div>
+        <div class="ssct-label">Notes on this video</div>
+        <textarea class="ssct-sheet-notes" placeholder="The hook, why it went viral, what to copy…">${esc(notesVal)}</textarea>
+        <div class="ssct-sheet-btns">
+          <button class="ssct-sheet-save">${existing ? "Update" : "🔖 Save short"}</button>
+          ${existing ? '<button class="ssct-sheet-remove">Remove</button>' : ""}
+          <button class="ssct-sheet-cancel">Cancel</button>
+        </div>
+      </div>`);
+    panel.style.display = "block";
+
+    const getNotes = () => panel.querySelector(".ssct-sheet-notes").value;
+    const nicheWrap = panel.querySelector('[data-group="niche"]');
+    nicheWrap.querySelectorAll("[data-niche]").forEach((b) => {
+      b.onclick = () => {
+        selNiche = b.dataset.niche;
+        nicheWrap.querySelectorAll(".ssct-chip2").forEach((x) => x.classList.remove("on"));
+        b.classList.add("on");
+      };
+    });
+    nicheWrap.querySelector("[data-newniche]").onclick = () => {
+      const name = (prompt("New niche name:") || "").trim();
+      if (!name) return;
+      if (!niches.includes(name)) {
+        niches.push(name);
+        chrome.storage.local.set({ niches });
+      }
+      selNiche = name;
+      openVideoSheet({ ...video }, channel);
+    };
+
+    panel.querySelector(".ssct-sheet-save").onclick = () => {
+      let v = savedVideos.find((x) => x.videoId === video.videoId);
+      if (v) {
+        v.niche = selNiche;
+        v.notes = getNotes();
+      } else {
+        savedVideos.push({
+          videoId: video.videoId,
+          title: video.title || "",
+          channelId: video.channelId || (channel && channel.channelId) || "",
+          channelTitle: video.channelTitle || (channel && channel.title) || "",
+          views: video.views || 0,
+          thumb: `https://i.ytimg.com/vi/${video.videoId}/hqdefault.jpg`,
+          niche: selNiche || "",
+          notes: getNotes(),
+          addedAt: Date.now(),
+        });
+      }
+      chrome.storage.local.set({ savedVideos });
+      renderQuick((lastQuick && lastQuick.video) || video, channel);
+    };
+    panel.querySelector(".ssct-sheet-cancel").onclick = () => renderQuick((lastQuick && lastQuick.video) || video, channel);
+    const rm = panel.querySelector(".ssct-sheet-remove");
+    if (rm)
+      rm.onclick = () => {
+        const i = savedVideos.findIndex((x) => x.videoId === video.videoId);
+        if (i >= 0) {
+          savedVideos.splice(i, 1);
+          chrome.storage.local.set({ savedVideos });
+        }
+        renderQuick((lastQuick && lastQuick.video) || video, channel);
+      };
   }
 
   function renderQuick(video, channel) {
@@ -237,13 +617,16 @@
         ${statCell(compact(channel.subscribers), "subscribers")}
         ${statCell(fmt(channel.videoCount), "videos")}
       </div>
-      ${channelActionsHtml()}
+      ${channelActionsHtml(channel)}
+      <button class="ssct-savevid" type="button" data-act="savevid">${savedVideos.some((v) => v.videoId === (video && video.videoId)) ? "🔖 Short saved — edit" : "🔖 Save this short"}</button>
       <button class="ssct-scan" type="button" data-act="recent">📂 Show recent shorts</button>
     `);
 
     const recentBtn = panel.querySelector('[data-act="recent"]');
     if (recentBtn) recentBtn.onclick = () => showRecent(channel.channelId);
-    wireChannelActions(channelUrl);
+    const saveVid = panel.querySelector('[data-act="savevid"]');
+    if (saveVid) saveVid.onclick = () => openVideoSheet(video, channel);
+    wireChannelActions(channel);
     panel.style.display = "block";
   }
 
@@ -279,13 +662,13 @@
         ${statCell(cadenceText(upload), "upload rate")}
         ${statCell(topRecent ? compact(topRecent) : "—", "top recent")}
       </div>
-      ${channelActionsHtml()}
+      ${channelActionsHtml(channel)}
       ${recentGrid(recent, channel.channelId)}
       <button class="ssct-count" type="button" data-act="count">Count videos over 1M / 10M ▸</button>
       <a class="ssct-link" href="${channelUrl}" target="_blank" rel="noopener">Open channel ↗</a>
     `);
 
-    wireChannelActions(channelUrl);
+    wireChannelActions(channel);
     wireLinks();
     const count = panel.querySelector('[data-act="count"]');
     if (count) count.onclick = () => analyze();
@@ -417,7 +800,7 @@
 
   function scheduleQuick() {
     clearTimeout(quickTimer);
-    if (!autoShow) {
+    if (!autoShow || collapsed) {
       panel.style.display = "none";
       return;
     }
@@ -482,10 +865,14 @@
     }
   });
 
-  // Dock button reopens / refreshes the medium card (cheap), e.g. after closing it.
+  // Dock button reopens the panel (and clears the collapsed state so it resumes auto-showing).
   btn.addEventListener("click", () => {
     const vid = currentVideoId();
     if (!vid) return;
+    if (collapsed) {
+      collapsed = false;
+      chrome.storage.local.set({ panelCollapsed: false });
+    }
     if (lastQuick) renderQuick(lastQuick.video, lastQuick.channel);
     else runQuick(vid);
   });
@@ -497,11 +884,38 @@
     syncVisibility();
     scheduleQuick();
   });
+  chrome.storage.local.get(["watchlist", "niches", "savedVideos", "panelCollapsed", "tags", "madeBy", "madeFor", "languages"], (data) => {
+    watchlist = data.watchlist || [];
+    niches = data.niches || [];
+    savedVideos = data.savedVideos || [];
+    collapsed = !!data.panelCollapsed;
+    tags = data.tags && data.tags.length ? data.tags : DEFAULT_TAGS.slice();
+    madeBy = data.madeBy && data.madeBy.length ? data.madeBy : DEFAULT_MADE_BY.slice();
+    madeFor = data.madeFor && data.madeFor.length ? data.madeFor : DEFAULT_MADE_FOR.slice();
+    languages = data.languages && data.languages.length ? data.languages : DEFAULT_LANGUAGES.slice();
+    updateWatchCount();
+    syncVisibility();
+    scheduleQuick();
+  });
   chrome.storage.onChanged.addListener((changes, area) => {
     if (area === "sync" && changes.autoShow) {
       autoShow = changes.autoShow.newValue !== false;
       syncVisibility();
       scheduleQuick();
+    }
+    if (area === "local" && changes.watchlist) {
+      watchlist = changes.watchlist.newValue || [];
+      updateWatchCount();
+    }
+    if (area === "local" && changes.niches) niches = changes.niches.newValue || [];
+    if (area === "local" && changes.tags) tags = changes.tags.newValue || [];
+    if (area === "local" && changes.madeBy) madeBy = changes.madeBy.newValue || [];
+    if (area === "local" && changes.madeFor) madeFor = changes.madeFor.newValue || [];
+    if (area === "local" && changes.languages) languages = changes.languages.newValue || [];
+    if (area === "local" && changes.savedVideos) savedVideos = changes.savedVideos.newValue || [];
+    if (area === "local" && changes.panelCollapsed) {
+      collapsed = !!changes.panelCollapsed.newValue;
+      if (collapsed) panel.style.display = "none";
     }
   });
 
