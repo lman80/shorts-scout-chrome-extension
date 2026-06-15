@@ -530,27 +530,64 @@ function ensureRepEl() {
   }
   return p;
 }
+let repFetching = {}, repCurrent = null;
+
+// Pick the channel's best recent short (most-viewed short, else most-viewed upload).
+function repBestShort(recent) {
+  const shorts = (recent || []).filter((r) => r.isShort);
+  const list = shorts.length ? shorts : (recent || []);
+  if (!list.length) return "";
+  return list.slice().sort((a, b) => (b.views || 0) - (a.views || 0))[0].videoId;
+}
+function repPlay(p, id, anchor) {
+  if (IS_EXTENSION) {
+    p.innerHTML = `<a class="rp-open" href="https://www.youtube.com/shorts/${id}" target="_blank" rel="noopener">
+      <span class="rp-thumb" style="background-image:url('https://i.ytimg.com/vi/${id}/hqdefault.jpg')"><span class="rp-play">▶</span></span>
+      <span class="rp-cap">click to watch</span></a>`;
+  } else {
+    p.innerHTML = `<iframe src="https://www.youtube-nocookie.com/embed/${id}?autoplay=1&mute=1&playsinline=1&rel=0&controls=1&loop=1&playlist=${id}" allow="autoplay; encrypted-media; picture-in-picture" allowfullscreen></iframe>`;
+  }
+  positionRep(p, anchor);
+  p.classList.add("show");
+}
+function repMsg(p, text) { p.innerHTML = `<div class="rp-msg">${esc(text)}</div>`; }
+
 function showRepPreview(c, anchor) {
-  if (!c.repVideoId) return;
   clearTimeout(repHideTimer);
   clearTimeout(repShowTimer);
   repShowTimer = setTimeout(() => {
     const p = ensureRepEl();
-    const id = c.repVideoId;
-    if (IS_EXTENSION) {
-      p.innerHTML = `<a class="rp-open" href="https://www.youtube.com/shorts/${id}" target="_blank" rel="noopener">
-        <span class="rp-thumb" style="background-image:url('https://i.ytimg.com/vi/${id}/hqdefault.jpg')"><span class="rp-play">▶</span></span>
-        <span class="rp-cap">click to watch</span></a>`;
-    } else {
-      p.innerHTML = `<iframe src="https://www.youtube-nocookie.com/embed/${id}?autoplay=1&mute=1&playsinline=1&rel=0&controls=1&loop=1&playlist=${id}" allow="autoplay; encrypted-media; picture-in-picture" allowfullscreen></iframe>`;
-    }
+    repCurrent = c.channelId;
+    if (c.repVideoId) { repPlay(p, c.repVideoId, anchor); return; }
+    // No representative short chosen yet → grab the channel's top recent short,
+    // play it, and save it so it's instant next time (and syncs everywhere).
+    repMsg(p, "Finding a short…");
     positionRep(p, anchor);
     p.classList.add("show");
+    if (repFetching[c.channelId]) return;
+    repFetching[c.channelId] = true;
+    chrome.runtime.sendMessage({ type: "RECENT", channelId: c.channelId, maxItems: 30 }, (res) => {
+      repFetching[c.channelId] = false;
+      const stillHere = repCurrent === c.channelId;
+      const pp = document.getElementById("rep-preview");
+      const visible = pp && pp.classList.contains("show");
+      if (chrome.runtime.lastError) return;
+      if (!res || !res.ok) {
+        if (stillHere && visible) repMsg(pp, res && res.error === "NO_API_KEY" ? "Set your API key (🔑) to preview shorts" : "Couldn't load a short");
+        return;
+      }
+      const id = repBestShort(res.recent);
+      if (!id) { if (stillHere && visible) repMsg(pp, "No short found for this channel"); return; }
+      c.repVideoId = id;
+      save(); // persist + sync so it's instant everywhere next time
+      if (stillHere && visible) repPlay(pp, id, anchor);
+    });
   }, 110);
 }
 function hideRepPreview() {
   clearTimeout(repShowTimer);
   repHideTimer = setTimeout(() => {
+    repCurrent = null;
     const p = document.getElementById("rep-preview");
     if (p) { p.classList.remove("show"); p.innerHTML = ""; }
   }, 130);
@@ -944,7 +981,7 @@ function wireCard(card, c) {
   // Hover the channel header → play the representative short.
   const head = card.querySelector(".card-head");
   if (head) {
-    head.classList.toggle("has-rep", !!c.repVideoId);
+    head.classList.add("has-rep"); // hoverable: plays the pick, or auto-grabs one
     head.addEventListener("mouseenter", () => showRepPreview(c, head));
     head.addEventListener("mouseleave", hideRepPreview);
   }
