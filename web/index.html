@@ -308,6 +308,8 @@
       .recentviews .rv.has b { color: #46d17f; }
       .recentviews .rv-scan { flex: none; width: 34px; align-self: stretch; border: 1px solid var(--line2); background: var(--surface3); color: var(--dim); border-radius: 9px; cursor: pointer; font-size: 15px; }
       .recentviews .rv-scan:hover { color: var(--text); border-color: var(--accent, #ff0033); }
+      #scanAllTop.scanning { color: #ff5a5a; border-color: #ff5a5a; }
+      #scanAllTop.scanning svg { fill: #ff5a5a; animation: spin 0.9s linear infinite; }
 
       .controls { display: flex; gap: 7px; margin-top: 11px; }
       .controls select {
@@ -750,6 +752,11 @@
         <button data-view="analytics">Analytics</button>
         <button data-view="videos">Videos</button>
       </div>
+
+      <button class="btn" id="scanAllTop" title="Scan every channel's vidIQ 7/30-day views (opens each briefly in the background)">
+        <svg viewBox="0 0 24 24"><path d="M12 4a8 8 0 108 8h-2a6 6 0 11-6-6V4zm2-1 4 3-4 3V3z"/></svg>
+        <span id="scanAllLabel">Scan vidIQ</span>
+      </button>
 
       <div class="menu-wrap">
         <button class="btn" id="moreBtn" title="More actions">

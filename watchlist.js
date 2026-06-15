@@ -667,7 +667,7 @@ function setRep(c, videoId) {
 // Open a channel in a hidden background tab, let vidIQ load, capture its 7/30-day
 // views (content.js does the reading), then close the tab — so you don't have to
 // visit each channel by hand. Runs one at a time.
-let scanQueue = [], scanning = false, scanTotal = 0, scanDone = 0;
+let scanQueue = [], scanning = false, scanTotal = 0, scanDone = 0, scanCancelled = false;
 function scanChannel(id) { scanMany([id]); }
 function scanMany(ids) {
   ids = (ids || []).filter(Boolean);
@@ -677,17 +677,27 @@ function scanMany(ids) {
   scanTotal += ids.length;
   if (!scanning) runScanQueue();
 }
+function cancelScan() { scanQueue = []; scanCancelled = true; toast("Stopping after this channel…"); }
+function updateScanBtn() {
+  const lbl = document.getElementById("scanAllLabel");
+  const btn = document.getElementById("scanAllTop");
+  if (lbl) lbl.textContent = scanning ? `Stop · ${scanDone}/${scanTotal}` : "Scan vidIQ";
+  if (btn) btn.classList.toggle("scanning", scanning);
+}
 async function runScanQueue() {
-  scanning = true;
-  while (scanQueue.length) {
+  scanning = true; scanCancelled = false; updateScanBtn();
+  while (scanQueue.length && !scanCancelled) {
     const id = scanQueue.shift();
     scanDone++;
+    updateScanBtn();
     toast(`Scanning ${scanDone}/${scanTotal}…`);
     await scanOne(id);
   }
-  scanning = false; scanTotal = 0; scanDone = 0;
+  const stopped = scanCancelled;
+  scanning = false; scanTotal = 0; scanDone = 0; scanCancelled = false;
+  updateScanBtn();
   render();
-  toast("Scan complete ✓");
+  toast(stopped ? "Scan stopped" : "Scan complete ✓");
 }
 function scanOne(id) {
   return new Promise((resolve) => {
@@ -2351,6 +2361,11 @@ const scanAllBtn = document.getElementById("scanAll");
 if (scanAllBtn) {
   if (!IS_EXTENSION) scanAllBtn.style.display = "none"; // can't open YouTube+vidIQ from the website
   scanAllBtn.onclick = () => scanMany(state.watchlist.map((c) => c.channelId));
+}
+const scanAllTop = document.getElementById("scanAllTop");
+if (scanAllTop) {
+  if (!IS_EXTENSION) scanAllTop.style.display = "none";
+  scanAllTop.onclick = () => (scanning ? cancelScan() : scanMany(state.watchlist.map((c) => c.channelId)));
 }
 document.getElementById("addNiche").onclick = promptAddNiche;
 document.getElementById("manageTags").onclick = openTagManager;
