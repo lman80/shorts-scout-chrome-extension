@@ -1056,40 +1056,39 @@
     return false;
   }
   if (location.hash.indexOf("ssscan") >= 0) {
+    // Reliable path: drive everything through vidIQ's "View channel stats" popup,
+    // which always contains BOTH the 7-day stat and the 30-day chart — even on the
+    // many channels where the inline "Quick channel stats" panel never renders.
     const startedAt = Date.now();
-    let got7 = false, got30 = false, modalOpened = false, clicked = false, settle = 0, done = false;
+    let got7 = false, got30 = false, opened = false, clicked = false, settle = 0, done = false, openTries = 0;
     function finishScan() {
       if (done) return; done = true;
       clearInterval(iv);
       const id = vqChannelId();
       if (id && (got7 || got30)) vqAppendHistory(id);
+      try { console.log("[Shorts Scout] scan", id, "→ v7:" + got7, "v30:" + got30, Math.round((Date.now() - startedAt) / 1000) + "s"); } catch (e) {}
       chrome.runtime.sendMessage({ type: "SS_SCAN_DONE", channelId: id, got7: got7, got30: got30 });
     }
     const iv = setInterval(() => {
       const id = vqChannelId();
-      const elapsed = Date.now() - startedAt;
-      if (!id) { if (elapsed > 22000) finishScan(); return; }
-      // 7-day (inline) — keep trying until we get it
-      if (!got7) {
-        const m7 = /Views gained \(7 days\)\s*\+?([\d,]+)/i.exec(vqInlineText());
-        if (m7) { got7 = true; vqMaybeSave(id, { v7: vqInt(m7[1]) }); }
+      const el = Date.now() - startedAt;
+      if (!id) { if (el > 34000) finishScan(); return; }
+      const bt = document.body.innerText || "";
+      if (!opened) {
+        if (vqOpenStats()) { opened = true; openTries++; }      // vidIQ loaded → open popup
+        else if (el > 26000) finishScan();                      // vidIQ never loaded its button
+        return;
       }
-      // 30-day (open stats popup, flip to 30D, read) — only after vidIQ is up
-      if (!got30 && (got7 || elapsed > 4000)) {
-        if (!modalOpened) { vqOpenStats(); modalOpened = true; }
-        else if (vqModalText()) {
+      if (/Views gained \(7 days\)/i.test(bt)) {                // popup stats are in
+        if (!got7) { const m7 = /Views gained \(7 days\)\s*\+?([\d,]+)/i.exec(bt); if (m7) { got7 = true; vqMaybeSave(id, { v7: vqInt(m7[1]) }); } }
+        if (!got30) {
           if (!clicked) { vqClick30D(); clicked = true; settle = 0; }
-          else if (++settle >= 2) { // let the chart update after the 30D click
-            const m30 = /Views gained\s*\+?([\d,]+)\s*Daily/i.exec((vqModalText() || "").replace(/\s+/g, " "));
-            if (m30) { got30 = true; vqMaybeSave(id, { v30: vqInt(m30[1]) }); }
-          }
-        } else if (clicked === false && elapsed > 8000) {
-          vqOpenStats(); // popup didn't open — try again
+          else if (++settle >= 2) { const m30 = /Views gained\s*\+?([\d,]+)\s*Daily/i.exec(bt.replace(/\s+/g, " ")); if (m30) { got30 = true; vqMaybeSave(id, { v30: vqInt(m30[1]) }); } }
         }
-      }
+      } else if (el > 8000 && openTries < 3) { vqOpenStats(); openTries++; } // popup didn't render → nudge
       if (got7 && got30) finishScan();
-      else if (elapsed > 22000) finishScan(); // give up this round; the board will retry
-    }, 250);
+      else if (el > 34000) finishScan();
+    }, 300);
   }
 
   let lastPath = location.pathname;

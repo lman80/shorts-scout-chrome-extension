@@ -695,8 +695,8 @@ function setRep(c, videoId) {
 // Open a channel in a hidden background tab, let vidIQ load, capture its 7/30-day
 // views (content.js does the reading), then close the tab — so you don't have to
 // visit each channel by hand. Runs one at a time.
-const SCAN_CONCURRENCY = 15; // scan this many channels at once
-const SCAN_MAX_ATTEMPTS = 4;  // retry a channel until BOTH 7d and 30d are captured
+const SCAN_CONCURRENCY = 12; // scan this many channels at once
+const SCAN_MAX_ATTEMPTS = 5;  // retry a channel until BOTH 7d and 30d are captured
 let scanQueue = [], scanning = false, scanTotalUnique = 0, scanCompleted = 0, scanCancelled = false;
 let scanAttempts = {};
 function scanChannel(id) { scanMany([id]); }
@@ -722,7 +722,16 @@ async function runScanQueue() {
   let incomplete = 0;
   if (!stopped) {
     const vs = state.vidiqStats || {};
-    Object.keys(scanAttempts).forEach((id) => { const s = vs[id] || {}; if (s.v7 == null || s.v30 == null) incomplete++; });
+    const misses = [];
+    Object.keys(scanAttempts).forEach((id) => {
+      const s = vs[id] || {};
+      if (s.v7 == null || s.v30 == null) {
+        incomplete++;
+        const c = state.watchlist.find((x) => x.channelId === id);
+        misses.push((c ? c.title : id) + " [" + (s.v7 != null ? "7d✓" : "7d✗") + " " + (s.v30 != null ? "30d✓" : "30d✗") + "]");
+      }
+    });
+    if (misses.length) try { console.log("[Shorts Scout] " + misses.length + " channels couldn't be fully read:\n" + misses.join("\n")); } catch (e) {}
   }
   scanning = false; scanTotalUnique = 0; scanCompleted = 0; scanCancelled = false; scanAttempts = {};
   updateScanBtn();
@@ -751,7 +760,7 @@ function scanOne(id) {
       setTimeout(() => resolve(result), 200);
     };
     const onMsg = (msg) => { if (msg && msg.type === "SS_SCAN_DONE" && msg.channelId === id) { result = { got7: !!msg.got7, got30: !!msg.got30 }; finish(); } };
-    const to = setTimeout(finish, 26000); // hard cap if vidIQ never loads
+    const to = setTimeout(finish, 36000); // hard cap if vidIQ never loads
     chrome.runtime.onMessage.addListener(onMsg);
     try {
       chrome.tabs.create({ url: `https://www.youtube.com/channel/${id}#ssscan`, active: false }, (tab) => { tabId = tab && tab.id; });
