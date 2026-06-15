@@ -32,13 +32,14 @@ personal use with no credit card and no subscription.
 2. Open the **Rules** tab, paste the contents of **`firestore.rules`**, and **Publish**.
 
 ### 5. Put it online (pick one — all free)
-- **Firebase Hosting** (recommended, auto-allows sign-in):
+- **Firebase Hosting** (recommended, auto-allows sign-in). `firebase.json` is already
+  created, so no interactive `firebase init` is needed — just:
   ```
   npm install -g firebase-tools
   firebase login
-  cd web && firebase init hosting   # public dir: . (this folder); single-page app: No
-  firebase deploy
+  cd web && firebase deploy --only hosting --project <your-project-id>
   ```
+  (`<your-project-id>` is the `projectId` from your Firebase config.)
   Your site is at `https://<project>.web.app`.
 - **Netlify**: drag the `web/` folder onto <https://app.netlify.com/drop>. Then in Firebase →
   Authentication → Settings → **Authorized domains**, add your `*.netlify.app` domain.
