@@ -546,7 +546,10 @@ function repPlay(p, id, anchor) {
       <span class="rp-thumb" style="background-image:url('https://i.ytimg.com/vi/${id}/hqdefault.jpg')"><span class="rp-play">▶</span></span>
       <span class="rp-cap">click to watch</span></a>`;
   } else {
-    p.innerHTML = `<iframe src="https://www.youtube-nocookie.com/embed/${id}?autoplay=1&mute=0&playsinline=1&rel=0&controls=1&loop=1&playlist=${id}" allow="autoplay; encrypted-media; picture-in-picture" allowfullscreen></iframe>`;
+    // Muted autoplay is the only kind browsers let play instantly; unmuting
+    // without a click is blocked (it would pause). Controls are on so one click
+    // on the speaker un-mutes it.
+    p.innerHTML = `<iframe src="https://www.youtube-nocookie.com/embed/${id}?autoplay=1&mute=1&playsinline=1&rel=0&controls=1&loop=1&playlist=${id}" allow="autoplay; encrypted-media; picture-in-picture" allowfullscreen></iframe>`;
   }
   positionRep(p, anchor);
   p.classList.add("show");
