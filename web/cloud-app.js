@@ -206,21 +206,39 @@
   }
   function setStatus(t) { const el = document.getElementById("cloud-status"); if (el) el.textContent = t; }
 
+  // Import by picking the Export file directly (the .md or .json the extension
+  // produces). No copy/paste needed.
   function importData() {
-    const raw = prompt("Paste the JSON from your extension Export (the block under 'Raw data'), or the whole .md file's JSON:");
-    if (!raw) return;
-    let json = raw.trim();
-    const m = json.match(/```json\s*([\s\S]*?)```/);
+    const inp = document.createElement("input");
+    inp.type = "file";
+    inp.accept = ".md,.json,.txt,text/markdown,application/json,text/plain";
+    inp.style.display = "none";
+    document.body.appendChild(inp);
+    inp.onchange = () => {
+      const f = inp.files && inp.files[0];
+      inp.remove();
+      if (!f) return;
+      const reader = new FileReader();
+      reader.onload = () => parseAndImport(String(reader.result || ""), f.name);
+      reader.onerror = () => alert("Couldn't read that file.");
+      reader.readAsText(f);
+    };
+    inp.click();
+  }
+  function parseAndImport(raw, fileName) {
+    let json = (raw || "").trim();
+    const m = json.match(/```json\s*([\s\S]*?)```/); // the Export .md has a ```json block
     if (m) json = m[1];
     let data;
-    try { data = JSON.parse(json); } catch (e) { return alert("Couldn't parse that JSON."); }
+    try { data = JSON.parse(json); }
+    catch (e) { return alert(`Couldn't read "${fileName || "that file"}". Pick the file you got from the extension's ⋯ More → Export (its name ends in .md or .json).`); }
     const keys = ["niches", "nicheParents", "tags", "madeBy", "madeFor", "languages", "watchlist", "savedVideos", "snapshots"];
     const obj = {};
     keys.forEach((k) => { if (data[k] !== undefined) obj[k] = data[k]; });
-    if (!Object.keys(obj).length) return alert("No recognizable watchlist data found.");
-    if (!confirm(`Import ${(obj.watchlist || []).length} channels and overwrite the current board?`)) return;
+    if (!Object.keys(obj).length) return alert("That file didn't contain any watchlist data. Make sure it's the Export from the extension.");
+    if (!confirm(`Import ${(obj.watchlist || []).length} channels (and your niches/tags) — this replaces the current board. Continue?`)) return;
     chrome.storage.local.set(obj);
-    alert("Imported. Your board should populate now.");
+    alert("Imported ✓ Your board should fill in now.");
   }
 
   // ---- boot ----------------------------------------------------------------
