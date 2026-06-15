@@ -58,7 +58,8 @@ function load() {
     seedNichesFromChannels();
     syncControls();
     render();
-    setTimeout(preloadReps, 1200); // warm up hover-to-play for channels with no pick
+    setTimeout(maybeDailyRefresh, 500); // log today's views per niche (once/day)
+    setTimeout(preloadReps, 1500); // warm up hover-to-play for channels with no pick
   });
 }
 
@@ -425,6 +426,24 @@ function renderSubSection(parent, child, channels, suffixLabel) {
   return sec;
 }
 
+// Views/day for a niche, from the daily snapshots of its total reach.
+// rate = most recent day's view gain; avg = average daily gain over all data;
+// perCh = recent rate ÷ channel count (so it's comparable across niche sizes).
+function nicheViewsPerDay(niche) {
+  const pts = (state.snapshots || [])
+    .filter((s) => s.niches && typeof s.niches[niche] === "number")
+    .map((s) => ({ t: s.t, v: s.niches[niche] }));
+  if (pts.length < 2) return null;
+  const dayMs = 86400e3;
+  const last = pts[pts.length - 1], prev = pts[pts.length - 2], first = pts[0];
+  const rate = (last.v - prev.v) / Math.max((last.t - prev.t) / dayMs, 0.25);
+  const avg = (last.v - first.v) / Math.max((last.t - first.t) / dayMs, 0.25);
+  const chCount = uniqueChannelsInTree(niche).length || 1;
+  const perCh = rate / chCount;
+  const trend = rate > avg * 1.05 ? "up" : rate < avg * 0.95 ? "down" : "flat";
+  return { rate, perCh, avg, trend };
+}
+
 function renderColumn(niche) {
   const col = document.createElement("div");
   col.className = "col" + (niche === UNSORTED ? " unsorted" : "");
@@ -436,6 +455,16 @@ function renderColumn(niche) {
   const med = median(treeChannels.map(avgPerVideo).filter((v) => v > 0));
   const reach = treeChannels.reduce((s, c) => s + c.totalViews, 0);
 
+  const vpd = niche === UNSORTED ? null : nicheViewsPerDay(niche);
+  const arrow = vpd ? (vpd.trend === "up" ? "▲" : vpd.trend === "down" ? "▼" : "→") : "";
+  const sign = (n) => (n >= 0 ? "+" : "");
+  const vpdHtml = niche === UNSORTED ? "" : (vpd
+    ? `<div class="col-vpd ${vpd.trend}" title="Views gained per day across this niche. Arrow compares the latest day to the average. Updated each day you open the board.">
+         <span class="vpd-arrow">${arrow}</span><b>${sign(vpd.rate)}${compact(vpd.rate)}</b> views/day
+         <span class="vpd-sub">${sign(vpd.perCh)}${compact(vpd.perCh)}/channel · avg ${sign(vpd.avg)}${compact(vpd.avg)}/day</span>
+       </div>`
+    : `<div class="col-vpd building" title="Open the board on different days (with your API key set) to start tracking daily view growth.">views/day — building…</div>`);
+
   const head = document.createElement("div");
   head.className = "col-head";
   head.innerHTML = `
@@ -445,7 +474,8 @@ function renderColumn(niche) {
       <span class="col-count">${treeChannels.length}</span>
       ${niche === UNSORTED ? "" : `<button class="col-edit" title="Rename niche">✎</button><button class="col-del" title="Delete niche">✕</button>`}
     </div>
-    ${niche !== UNSORTED ? `<div class="col-sub"><span><b>${compact(reach)}</b> reach</span><span>median <b>${med ? compact(med) : "—"}</b>/vid</span>${kids.length ? `<span><b>${kids.length}</b> sub-niche${kids.length === 1 ? "" : "s"}</span>` : ""}</div>` : ""}`;
+    ${niche !== UNSORTED ? `<div class="col-sub"><span><b>${compact(reach)}</b> reach</span><span>median <b>${med ? compact(med) : "—"}</b>/vid</span>${kids.length ? `<span><b>${kids.length}</b> sub-niche${kids.length === 1 ? "" : "s"}</span>` : ""}</div>` : ""}
+    ${vpdHtml}`;
   if (niche !== UNSORTED) {
     head.querySelector(".col-edit").onclick = () => renameNiche(niche);
     head.querySelector(".col-del").onclick = () => deleteNiche(niche);
@@ -540,16 +570,31 @@ function repBestShort(recent) {
   if (!list.length) return "";
   return list.slice().sort((a, b) => (b.views || 0) - (a.views || 0))[0].videoId;
 }
+// Remember the user's "sound on" choice across hovers. Browsers only allow
+// unmuted autoplay after the user has interacted with the page this load, so we
+// track that too and fall back to muted + a one-tap "sound" button otherwise.
+function repWantSound() { try { return localStorage.getItem("ss_repSound") === "1"; } catch (e) { return false; } }
+let pageInteracted = false;
+document.addEventListener("pointerdown", () => { pageInteracted = true; }, true);
+
 function repPlay(p, id, anchor) {
   if (IS_EXTENSION) {
     p.innerHTML = `<a class="rp-open" href="https://www.youtube.com/shorts/${id}" target="_blank" rel="noopener">
       <span class="rp-thumb" style="background-image:url('https://i.ytimg.com/vi/${id}/hqdefault.jpg')"><span class="rp-play">▶</span></span>
       <span class="rp-cap">click to watch</span></a>`;
   } else {
-    // Muted autoplay is the only kind browsers let play instantly; unmuting
-    // without a click is blocked (it would pause). Controls are on so one click
-    // on the speaker un-mutes it.
-    p.innerHTML = `<iframe src="https://www.youtube-nocookie.com/embed/${id}?autoplay=1&mute=1&playsinline=1&rel=0&controls=1&loop=1&playlist=${id}" allow="autoplay; encrypted-media; picture-in-picture" allowfullscreen></iframe>`;
+    const sound = repWantSound() && pageInteracted; // unmuted only when the browser will allow it
+    p.innerHTML = `<iframe src="https://www.youtube-nocookie.com/embed/${id}?autoplay=1&mute=${sound ? 0 : 1}&playsinline=1&rel=0&controls=1&loop=1&playlist=${id}" allow="autoplay; encrypted-media; picture-in-picture" allowfullscreen></iframe>`
+      + (sound ? "" : `<button class="rp-sound" type="button">🔊 Tap for sound</button>`);
+    if (!sound) {
+      const b = p.querySelector(".rp-sound");
+      if (b) b.onclick = (e) => {
+        e.preventDefault(); e.stopPropagation();
+        try { localStorage.setItem("ss_repSound", "1"); } catch (_) {}
+        pageInteracted = true;
+        repPlay(p, id, anchor); // reload this preview with sound on
+      };
+    }
   }
   positionRep(p, anchor);
   p.classList.add("show");
@@ -1289,17 +1334,17 @@ function closeGroupsManager() {
 // ---- refresh from API ------------------------------------------------------
 
 let refreshing = false;
-function doRefresh() {
+function doRefresh(silent) {
   if (refreshing || !state.watchlist.length) return;
   refreshing = true;
   const btn = document.getElementById("refresh");
-  btn.classList.add("spin");
+  if (btn) btn.classList.add("spin");
   const ids = state.watchlist.map((c) => c.channelId);
   chrome.runtime.sendMessage({ type: "REFRESH_CHANNELS", ids }, (resp) => {
     refreshing = false;
-    btn.classList.remove("spin");
-    if (chrome.runtime.lastError) return toast("Refresh failed — is the extension loaded?");
-    if (!resp || !resp.ok) return toast(resp && resp.error === "NO_API_KEY" ? "Set your API key first" : "Refresh failed");
+    if (btn) btn.classList.remove("spin");
+    if (chrome.runtime.lastError) return silent || toast("Refresh failed — is the extension loaded?");
+    if (!resp || !resp.ok) return silent || toast(resp && resp.error === "NO_API_KEY" ? "Set your API key first" : "Refresh failed");
     let n = 0;
     const now = Date.now();
     for (const c of state.watchlist) {
@@ -1318,8 +1363,18 @@ function doRefresh() {
     save();
     recordSnapshot();
     render();
-    toast(`Refreshed ${n} channel${n === 1 ? "" : "s"}`);
+    if (!silent) toast(`Refreshed ${n} channel${n === 1 ? "" : "s"}`);
   });
+}
+
+// Once per day on open: refresh stats and log a snapshot so each niche's
+// views/day is tracked over time. Cheap (~a few API units for all channels).
+function maybeDailyRefresh() {
+  if (!state.watchlist.length) return;
+  const snaps = state.snapshots || [];
+  const last = snaps[snaps.length - 1];
+  if (last && Date.now() - last.t < 20 * 3600e3) return; // already logged today
+  doRefresh(true);
 }
 
 // ---- review drawer (watch a channel's shorts + categorize in place) --------
