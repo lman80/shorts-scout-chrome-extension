@@ -25,10 +25,14 @@ git add -A && git commit -m "..." && git push
 - `options.html` / `options.js` — API key + thresholds + auto-show settings (chrome.storage.sync)
 - `watchlist.html` / `watchlist.js` — full-page niche board (Kanban: columns = niches,
   cards = saved channels). Opened in a tab from the in-panel watchlist's "⤢ Board" button.
-  Includes a **Notebook** (toolbar button): a Markdown editor (write/split/preview) that
-  renders via the vendored `marked.min.js` (MIT, bundled — extension-page CSP blocks CDN
-  scripts). Images are pasted/dropped, stored as data URLs in `notebookImages` (keyed by id,
-  referenced in the md as `img:<id>`), markdown text in `notebookMd`. Needs `unlimitedStorage`.
+  Includes a **Notebook** (in the ⋯ More menu): an Obsidian-style live Markdown editor — the
+  doc is split into blocks (`nbSplitBlocks`, fence-aware) rendered formatted via the vendored
+  `marked.min.js` (MIT, bundled — extension-page CSP blocks CDN scripts); clicking a block
+  swaps just that block to a raw textarea, clicking away re-renders it (no split view). Images
+  pasted/dropped → data URLs in `notebookImages` (keyed by id, referenced as `img:<id>`),
+  text in `notebookMd`. Needs `unlimitedStorage`. The board's recent-shorts toggle updates the
+  card in place (not a full `render()`) and `render()` preserves `.board` scrollLeft, so
+  expanding shorts no longer jumps the horizontal scroll.
 - `marked.min.js` — vendored Markdown parser (do not edit; it's the upstream minified file).
 - `icon128.png` — toolbar icon
 - `README.md` — end-user setup + install instructions
@@ -37,8 +41,15 @@ git add -A && git commit -m "..." && git push
 - Needs a free **YouTube Data API v3** key (stored in `chrome.storage.sync`, never in code).
 - Watchlist (saved channels) is stored in `chrome.storage.local` under key `watchlist`
   (array of `{channelId, title, totalViews, subscribers, videoCount, addedAt, refreshedAt,
-  thumb, customUrl, niches:[], tags:[], madeBy:[], madeFor:[], languages:[], notes,
-  examples:[{url,title}]}`). **niches is an array** (multi-select) — a channel shows in every
+  thumb, customUrl, niches:[], tags:[], madeBy:[], madeFor:[], languages:[], topCandidate,
+  notes, examples:[{url,title}]}`). **topCandidate** is a per-channel gold flag (★ star on the
+  card + gold accent, toggle in the Review drawer & in-YouTube save sheet); the toolbar ★ button
+  filters to top candidates only, and they get their own Export section. Each channel also has
+  a **repVideoId** (representative short): hovering a card's `.card-head` plays it (autoplaying
+  muted youtube-nocookie embed on the website; click-to-watch thumbnail on the extension page
+  where embeds are blocked — `IS_EXTENSION` switch). Auto-set to the watched short on save
+  (content.js `saveChannelEntry`); override via the 📌 pins in the recent-shorts grid and the
+  Review drawer (`setRep`). **niches is an array** (multi-select) — a channel shows in every
   matching board column; `normalize()` migrates a legacy single `niche` string into the array.
   **Niche hierarchy:** `nicheParents` (storage key, map child→parent) groups sub-niches under a
   parent. A board column is rendered per top-level niche with collapsible sub-niche sections;
@@ -61,7 +72,15 @@ git add -A && git commit -m "..." && git push
 - The board (`watchlist.html`) has four views: **Board** (niche columns, drag-drop),
   **Table** (sortable), **Analytics** (niche reach leaderboard, recent velocity via the
   RECENT message, channel momentum = recentAvg/lifetimeAvg, tracked growth from snapshots),
-  and **Videos** (saved shorts with notes). Headline metric is **avg views/video** =
+  and **Videos** (saved shorts with notes). Analytics is chart-driven (hand-rolled SVG: `lineChart`,
+  `scatterChart`, sparklines — no external lib): scorecard with top/fastest-growing niche, a niche
+  **opportunity scatter** (x=median videos, y=median avg/video, log scale, bubble=reach, top-left
+  quadrant highlighted), reach leaderboard with momentum, a **"Run deep analysis"** step that pages
+  ~150 recent uploads/channel (RECENT msg `maxItems`, into `historyCache`) to compute **weekly views
+  per niche** (12-wk line), **momentum** over 7/30/90d windows (`channelWindow`/`channelsWindow` =
+  views vs the prior equal window), heating-up/cooling channel lists, and breakdowns by made-for /
+  language. A 7/30/90 timeframe toggle (`anWindow`) drives momentum. Snapshots now store per-niche
+  reach for the tracked-growth multi-line chart. Headline metric is **avg views/video** =
   totalViews/videoCount. **▶ Review** opens a side drawer with categorize chips + a
   scrollable 3-col grid of the channel's recent shorts (tap = watch, 🔖 = save). YouTube's
   embedded player fails on extension pages (Error 152/153, no valid referrer) and the full

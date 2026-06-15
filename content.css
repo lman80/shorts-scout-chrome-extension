@@ -443,8 +443,14 @@
   border-color: #3a3a3a;
 }
 
-/* Save sheet (niche / status / notes) */
+/* Save sheet (niche / tags / notes) */
 #ssct-panel .ssct-sheet-title { font-size: 14px; font-weight: 800; margin-bottom: 6px; }
+#ssct-panel .ssct-topcand {
+  width: 100%; margin: 4px 0 8px; padding: 9px; background: #1b1b1b; color: #f1f1f1;
+  border: 1px solid #2a2a2a; border-radius: 9px; font: 700 12.5px/1 Roboto, Arial, sans-serif; cursor: pointer;
+}
+#ssct-panel .ssct-topcand:hover { border-color: #444; }
+#ssct-panel .ssct-topcand.on { background: rgba(255,203,71,0.14); border-color: rgba(255,203,71,0.5); color: #ffd24d; }
 #ssct-panel .ssct-label {
   font-size: 10.5px; text-transform: uppercase; letter-spacing: 0.05em;
   color: #9a9a9a; font-weight: 700; margin: 12px 0 6px;

@@ -201,40 +201,45 @@ async function scanChannelVideos(channelId, apiKey, onProgress) {
 // Cheap: just the newest page of uploads (1 playlistItems + 1 videos call = 2 units).
 // Enough for the recent-shorts grid + last-upload + cadence — no full channel walk.
 async function fetchRecentUploads(channel, apiKey, maxItems = 50) {
-  const page = await apiGet(
-    "playlistItems",
-    { part: "contentDetails", playlistId: channel.uploadsPlaylist, maxResults: 50 },
-    apiKey
-  );
-  const items = page.items || [];
-  const ids = items.map((i) => i.contentDetails?.videoId).filter(Boolean);
-
   const recent = [];
   const publishTimes = [];
-  if (ids.length) {
-    const stats = await apiGet(
-      "videos",
-      { part: "statistics,snippet,contentDetails", id: ids.join(",") },
+  let pageToken = "";
+  let pages = 0;
+  while (recent.length < maxItems && pages < 6) {
+    const page = await apiGet(
+      "playlistItems",
+      { part: "contentDetails", playlistId: channel.uploadsPlaylist, maxResults: 50, ...(pageToken ? { pageToken } : {}) },
       apiKey
     );
-    for (const v of stats.items || []) {
-      const views = Number(v.statistics?.viewCount || 0);
-      const when = new Date(v.snippet?.publishedAt || 0).getTime();
-      publishTimes.push(when);
-      if (recent.length < maxItems) {
-        const durationSec = isoDurationToSec(v.contentDetails?.duration);
-        const t = v.snippet?.thumbnails || {};
-        recent.push({
-          videoId: v.id,
-          title: v.snippet?.title || "",
-          thumb: (t.medium || t.high || t.default || {}).url || "",
-          views,
-          publishedAt: when,
-          durationSec,
-          isShort: durationSec != null && durationSec <= 180,
-        });
+    const items = page.items || [];
+    const ids = items.map((i) => i.contentDetails?.videoId).filter(Boolean);
+    if (ids.length) {
+      const stats = await apiGet(
+        "videos",
+        { part: "statistics,snippet,contentDetails", id: ids.join(",") },
+        apiKey
+      );
+      for (const v of stats.items || []) {
+        const when = new Date(v.snippet?.publishedAt || 0).getTime();
+        publishTimes.push(when);
+        if (recent.length < maxItems) {
+          const durationSec = isoDurationToSec(v.contentDetails?.duration);
+          const t = v.snippet?.thumbnails || {};
+          recent.push({
+            videoId: v.id,
+            title: v.snippet?.title || "",
+            thumb: (t.medium || t.high || t.default || {}).url || "",
+            views: Number(v.statistics?.viewCount || 0),
+            publishedAt: when,
+            durationSec,
+            isShort: durationSec != null && durationSec <= 180,
+          });
+        }
       }
     }
+    pageToken = page.nextPageToken || "";
+    pages++;
+    if (!pageToken) break;
   }
   return { recent, upload: computeUploadStats(publishTimes) };
 }
@@ -290,8 +295,9 @@ chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
 
       if (msg.type === "RECENT") {
         // Cheap recent-shorts grid + cadence, no full milestone scan.
+        // maxItems lets Analytics pull deeper history (paged) for trend analysis.
         const channel = await getChannelCached(msg.channelId, apiKey);
-        const { recent, upload } = await fetchRecentUploads(channel, apiKey);
+        const { recent, upload } = await fetchRecentUploads(channel, apiKey, Math.min(200, Math.max(1, msg.maxItems || 50)));
         sendResponse({ ok: true, channel, recent, upload });
         return;
       }

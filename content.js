@@ -379,6 +379,7 @@
     const d = draft || {};
     let selNiches = d.niches !== undefined ? d.niches.slice() : existing ? (existing.niches || (existing.niche ? [existing.niche] : [])).slice() : [];
     const notesVal = d.notes !== undefined ? d.notes : existing ? existing.notes : "";
+    let selTop = d.top !== undefined ? d.top : existing ? !!existing.topCandidate : false;
 
     // Selected values per dimension.
     const sel = {};
@@ -397,6 +398,7 @@
       <div class="ssct-sheet">
         <div class="ssct-sheet-title">${existing ? "Edit saved channel" : "Save channel"}</div>
         <div class="ssct-channel-name">${esc(channel.title) || "Channel"}</div>
+        <button class="ssct-topcand${selTop ? " on" : ""}" type="button" data-act="top">${selTop ? "★ Top candidate" : "☆ Mark as top candidate"}</button>
         <div class="ssct-label">Niches <span style="text-transform:none;letter-spacing:0;color:#777">— select any</span></div>
         <div class="ssct-chips2" data-group="niche">${nicheChipsHtml}<button class="ssct-chip2 new" data-newniche>＋ New</button></div>
         <div class="ssct-label">Labels</div>
@@ -412,7 +414,14 @@
     panel.style.display = "block";
 
     const getNotes = () => panel.querySelector(".ssct-sheet-notes").value;
-    const reopenDraft = () => ({ niches: selNiches, ...sel, notes: getNotes() });
+    const reopenDraft = () => ({ niches: selNiches, ...sel, notes: getNotes(), top: selTop });
+
+    const topBtn = panel.querySelector('[data-act="top"]');
+    topBtn.onclick = () => {
+      selTop = !selTop;
+      topBtn.classList.toggle("on", selTop);
+      topBtn.textContent = selTop ? "★ Top candidate" : "☆ Mark as top candidate";
+    };
 
     const nicheWrap = panel.querySelector('[data-group="niche"]');
     nicheWrap.querySelectorAll("[data-niche]").forEach((b) => {
@@ -484,7 +493,7 @@
       };
     });
 
-    panel.querySelector(".ssct-sheet-save").onclick = () => saveChannelEntry(channel, selNiches, sel, getNotes());
+    panel.querySelector(".ssct-sheet-save").onclick = () => saveChannelEntry(channel, selNiches, sel, getNotes(), selTop);
     panel.querySelector(".ssct-sheet-cancel").onclick = () => renderQuick((lastQuick && lastQuick.video) || null, channel);
     const rm = panel.querySelector(".ssct-sheet-remove");
     if (rm)
@@ -499,7 +508,7 @@
       };
   }
 
-  function saveChannelEntry(channel, nichesArr, labels, notes) {
+  function saveChannelEntry(channel, nichesArr, labels, notes, topCand) {
     let e = watchlist.find((w) => w.channelId === channel.channelId);
     if (!e) {
       e = {
@@ -521,7 +530,13 @@
     e.madeBy = labels.madeBy || [];
     e.madeFor = labels.madeFor || [];
     e.languages = labels.languages || [];
+    e.topCandidate = !!topCand;
     e.notes = notes;
+    // Default the channel's representative short to whatever the user is watching now.
+    if (!e.repVideoId) {
+      const cur = (lastQuick && lastQuick.video && lastQuick.video.videoId) || currentVideoId() || "";
+      if (cur) e.repVideoId = cur;
+    }
     saveWatchlist();
     updateWatchCount();
     renderQuick((lastQuick && lastQuick.video) || null, channel);
