@@ -60,8 +60,7 @@ function load() {
     seedNichesFromChannels();
     syncControls();
     render();
-    setTimeout(maybeDailyRefresh, 500); // log today's views per niche (once/day)
-    setTimeout(warmRecentStats, 1500); // rep shorts + 7/30-day views per channel
+    setTimeout(warmRecentStats, 1200); // rep shorts for hover-play
   });
 }
 
@@ -447,22 +446,23 @@ function renderSubSection(parent, child, channels, suffixLabel) {
   return sec;
 }
 
-// Views/day for a niche, from the daily snapshots of its total reach.
-// rate = most recent day's view gain; avg = average daily gain over all data;
-// perCh = recent rate ÷ channel count (so it's comparable across niche sizes).
-function nicheViewsPerDay(niche) {
-  const pts = (state.snapshots || [])
-    .filter((s) => s.niches && typeof s.niches[niche] === "number")
-    .map((s) => ({ t: s.t, v: s.niches[niche] }));
-  if (pts.length < 2) return null;
-  const dayMs = 86400e3;
-  const last = pts[pts.length - 1], prev = pts[pts.length - 2], first = pts[0];
-  const rate = (last.v - prev.v) / Math.max((last.t - prev.t) / dayMs, 0.25);
-  const avg = (last.v - first.v) / Math.max((last.t - first.t) / dayMs, 0.25);
-  const chCount = uniqueChannelsInTree(niche).length || 1;
-  const perCh = rate / chCount;
-  const trend = rate > avg * 1.05 ? "up" : rate < avg * 0.95 ? "down" : "flat";
-  return { rate, perCh, avg, trend };
+// Niche recent performance, summed from the real vidIQ 7/30-day views of its
+// channels. mom = 7-day pace vs 30-day pace (>1 = the niche is heating up).
+// freshT = newest scan time across the niche (for the "re-sync" staleness flag).
+function nicheRecent(niche) {
+  const chs = uniqueChannelsInTree(niche);
+  let v7 = 0, v30 = 0, have = 0, freshT = 0, has7 = false, has30 = false;
+  chs.forEach((c) => {
+    const s = (state.vidiqStats || {})[c.channelId];
+    if (!s) return;
+    if (typeof s.v7 === "number") { v7 += s.v7; has7 = true; }
+    if (typeof s.v30 === "number") { v30 += s.v30; has30 = true; }
+    if (s.v7 != null || s.v30 != null) { have++; if (s.t) freshT = Math.max(freshT, s.t); }
+  });
+  if (!have) return null;
+  const mom = has7 && has30 && v30 > 0 ? (v7 / 7) / (v30 / 30) : null;
+  const trend = mom == null ? "flat" : mom >= 1.1 ? "up" : mom <= 0.9 ? "down" : "flat";
+  return { v7: has7 ? v7 : null, v30: has30 ? v30 : null, mom, trend, have, total: chs.length, freshT };
 }
 
 function renderColumn(niche) {
@@ -476,15 +476,26 @@ function renderColumn(niche) {
   const med = median(treeChannels.map(avgPerVideo).filter((v) => v > 0));
   const reach = treeChannels.reduce((s, c) => s + c.totalViews, 0);
 
-  const vpd = niche === UNSORTED ? null : nicheViewsPerDay(niche);
-  const arrow = vpd ? (vpd.trend === "up" ? "▲" : vpd.trend === "down" ? "▼" : "→") : "";
-  const sign = (n) => (n >= 0 ? "+" : "");
-  const vpdHtml = niche === UNSORTED ? "" : (vpd
-    ? `<div class="col-vpd ${vpd.trend}" title="Views gained per day across this niche. Arrow compares the latest day to the average. Updated each day you open the board.">
-         <span class="vpd-arrow">${arrow}</span><b>${sign(vpd.rate)}${compact(vpd.rate)}</b> views/day
-         <span class="vpd-sub">${sign(vpd.perCh)}${compact(vpd.perCh)}/channel · avg ${sign(vpd.avg)}${compact(vpd.avg)}/day</span>
-       </div>`
-    : `<div class="col-vpd building" title="Open the board on different days (with your API key set) to start tracking daily view growth.">views/day — building…</div>`);
+  const nr = niche === UNSORTED ? null : nicheRecent(niche);
+  let vpdHtml = "";
+  if (niche !== UNSORTED) {
+    if (!nr) {
+      vpdHtml = `<div class="col-vpd building" title="Run Scan vidIQ (top bar) to pull each channel's real 7/30-day views.">scan vidIQ for 7-day views</div>`;
+    } else {
+      const sign = (n) => (n >= 0 ? "+" : "");
+      const momPct = nr.mom != null ? Math.round((nr.mom - 1) * 100) : null;
+      const arrow = nr.trend === "up" ? "🔥" : nr.trend === "down" ? "❄️" : "→";
+      const ageH = nr.freshT ? (Date.now() - nr.freshT) / 3600e3 : Infinity;
+      const stale = ageH > 24;
+      const ageLabel = !isFinite(ageH) ? "?" : ageH < 24 ? Math.round(ageH) + "h" : Math.round(ageH / 24) + "d";
+      vpdHtml = `<div class="col-vpd ${nr.trend}" title="Total views the niche's channels got in the last 7 / 30 days (from vidIQ). 🔥/❄️ = the niche's recent pace vs its 30-day average.">
+        <b>${nr.v7 != null ? compact(nr.v7) : "—"}</b> views · 7d
+        ${momPct != null ? `<span class="vpd-arrow">${arrow} ${sign(momPct)}${momPct}%</span>` : ""}
+        <span class="vpd-sub">${nr.v30 != null ? compact(nr.v30) + " · 30d" : ""}${nr.have < nr.total ? `${nr.v30 != null ? " · " : ""}${nr.have}/${nr.total} scanned` : ""}</span>
+        ${stale ? `<span class="col-stale">⚠ data ${ageLabel} old — re-sync</span>` : ""}
+      </div>`;
+    }
+  }
 
   const head = document.createElement("div");
   head.className = "col-head";
@@ -1475,16 +1486,6 @@ function doRefresh(silent) {
     render();
     if (!silent) toast(`Refreshed ${n} channel${n === 1 ? "" : "s"}`);
   });
-}
-
-// Once per day on open: refresh stats and log a snapshot so each niche's
-// views/day is tracked over time. Cheap (~a few API units for all channels).
-function maybeDailyRefresh() {
-  if (!state.watchlist.length) return;
-  const snaps = state.snapshots || [];
-  const last = snaps[snaps.length - 1];
-  if (last && Date.now() - last.t < 20 * 3600e3) return; // already logged today
-  doRefresh(true);
 }
 
 // ---- review drawer (watch a channel's shorts + categorize in place) --------
