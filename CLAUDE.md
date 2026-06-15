@@ -33,6 +33,23 @@ git add -A && git commit -m "..." && git push
   text in `notebookMd`. Needs `unlimitedStorage`. The board's recent-shorts toggle updates the
   card in place (not a full `render()`) and `render()` preserves `.board` scrollLeft, so
   expanding shorts no longer jumps the horizontal scroll.
+- `cloud-sync.js` — background-worker module (`importScripts` from `background.js`) that
+  two-way syncs the board with the website. Both read/write ONE shared Firestore doc
+  `boards/shared` (project `shorts-scout-d6c36`) in **open mode** (no auth; Firestore rules
+  allow read/write on that one doc). Pushes local `chrome.storage.local` edits up (debounced)
+  and pulls remote changes down on a 1-min `chrome.alarms` tick + an immediate pull when the
+  board opens (watchlist.js sends `{type:"CLOUD_SYNC"}`). Last-write-wins via a `_rev` ms stamp;
+  safety rule: never overwrite a non-empty board with an empty one. Synced keys: watchlist,
+  niches, nicheParents, tags, madeBy, madeFor, languages, savedVideos, snapshots, notebookMd.
+  `apiKey` (sync storage) and `notebookImages` are NOT synced (per-device). Needs manifest
+  `alarms` permission + `https://firestore.googleapis.com/*` host permission.
+- `web/` — the standalone website (Firebase Hosting at https://shorts-scout-d6c36.web.app).
+  `build.py` generates `index.html` from `watchlist.html` and copies `watchlist.js`+`marked.min.js`;
+  `cloud-app.js` provides a `window.chrome` shim (storage→Firestore `boards/shared`, sendMessage→
+  YouTube API) so the extension's `watchlist.js` runs unchanged. Open mode: no sign-in; the YouTube
+  API key is kept in `localStorage` per-device. After changing `watchlist.html`/`watchlist.js`:
+  `python3 web/build.py` then `firebase deploy --only hosting` from `web/` (Firebase CLI is logged
+  in as imamiller64@gmail.com; gcloud installed for project admin).
 - `marked.min.js` — vendored Markdown parser (do not edit; it's the upstream minified file).
 - `icon128.png` — toolbar icon
 - `README.md` — end-user setup + install instructions
