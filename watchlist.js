@@ -663,6 +663,51 @@ function setRep(c, videoId) {
   toast(c.repVideoId ? "Set as the channel's short" : "Cleared representative short");
 }
 
+// ---- vidIQ scan (extension only) -------------------------------------------
+// Open a channel in a hidden background tab, let vidIQ load, capture its 7/30-day
+// views (content.js does the reading), then close the tab — so you don't have to
+// visit each channel by hand. Runs one at a time.
+let scanQueue = [], scanning = false, scanTotal = 0, scanDone = 0;
+function scanChannel(id) { scanMany([id]); }
+function scanMany(ids) {
+  ids = (ids || []).filter(Boolean);
+  if (!IS_EXTENSION) { toast("Scanning runs in the extension board (it opens YouTube + vidIQ)."); return; }
+  if (!ids.length) return;
+  scanQueue.push(...ids);
+  scanTotal += ids.length;
+  if (!scanning) runScanQueue();
+}
+async function runScanQueue() {
+  scanning = true;
+  while (scanQueue.length) {
+    const id = scanQueue.shift();
+    scanDone++;
+    toast(`Scanning ${scanDone}/${scanTotal}…`);
+    await scanOne(id);
+  }
+  scanning = false; scanTotal = 0; scanDone = 0;
+  render();
+  toast("Scan complete ✓");
+}
+function scanOne(id) {
+  return new Promise((resolve) => {
+    let finished = false, tabId = null;
+    const finish = () => {
+      if (finished) return; finished = true;
+      clearTimeout(to);
+      chrome.runtime.onMessage.removeListener(onMsg);
+      if (tabId != null) { try { chrome.tabs.remove(tabId, () => void chrome.runtime.lastError); } catch (e) {} }
+      setTimeout(resolve, 250);
+    };
+    const onMsg = (msg) => { if (msg && msg.type === "SS_SCAN_DONE" && msg.channelId === id) finish(); };
+    const to = setTimeout(finish, 24000); // hard cap if vidIQ never loads
+    chrome.runtime.onMessage.addListener(onMsg);
+    try {
+      chrome.tabs.create({ url: `https://www.youtube.com/channel/${id}#ssscan`, active: false }, (tab) => { tabId = tab && tab.id; });
+    } catch (e) { finish(); }
+  });
+}
+
 // Once per session (when stale): for each channel, fetch its recent uploads to
 // (a) pick a representative short if none is set, and (b) compute views on
 // uploads from the last 7 / 30 days. Throttled; best-effort; cached per channel.
@@ -762,9 +807,10 @@ function renderCard(c) {
       <span class="pill">🎬 <b>${compact(c.videoCount)}</b></span>
     </div>
 
-    <div class="recentviews" title="Real views gained, read from vidIQ. 7-day captures when you open the channel on YouTube; 30-day fills in when you open vidIQ's 'View channel stats'.">
+    <div class="recentviews" title="Real views gained, read from vidIQ. Click ⟳ to scan this channel now, or it captures when you open the channel on YouTube.">
       <span class="rv${vq.v7 != null ? " has" : ""}"><b>${typeof vq.v7 === "number" ? compact(vq.v7) : "—"}</b><i>views · 7d</i></span>
       <span class="rv${vq.v30 != null ? " has" : ""}"><b>${typeof vq.v30 === "number" ? compact(vq.v30) : "—"}</b><i>views · 30d</i></span>
+      ${IS_EXTENSION ? `<button class="rv-scan" data-act="scan" title="Scan now with vidIQ (opens this channel briefly, reads the numbers, closes it)">⟳</button>` : ""}
     </div>
 
     <div class="controls">
@@ -1064,6 +1110,8 @@ function wireCard(card, c) {
   };
   const notes = card.querySelector(".notes");
   card.querySelector('[data-act="notes"]').onclick = () => notes.classList.toggle("open");
+  const scanBtn = card.querySelector('[data-act="scan"]');
+  if (scanBtn) scanBtn.onclick = () => scanChannel(c.channelId);
   notes.onchange = () => {
     c.notes = notes.value;
     save();
@@ -2299,6 +2347,11 @@ document.querySelectorAll("#viewseg button").forEach((b) => {
   b.onclick = () => { state.view = b.dataset.view; syncControls(); save(); render(); };
 });
 document.getElementById("refresh").onclick = doRefresh;
+const scanAllBtn = document.getElementById("scanAll");
+if (scanAllBtn) {
+  if (!IS_EXTENSION) scanAllBtn.style.display = "none"; // can't open YouTube+vidIQ from the website
+  scanAllBtn.onclick = () => scanMany(state.watchlist.map((c) => c.channelId));
+}
 document.getElementById("addNiche").onclick = promptAddNiche;
 document.getElementById("manageTags").onclick = openTagManager;
 document.getElementById("manageGroups").onclick = openGroupsManager;

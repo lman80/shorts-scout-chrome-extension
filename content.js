@@ -1007,6 +1007,41 @@
   }
   setInterval(vqTick, 1500);
 
+  // Scan mode: the board opens the channel in a hidden tab with #ssscan so it can
+  // pull the numbers without you browsing there. Capture 7-day (inline) + 30-day
+  // (open vidIQ's stats, flip to 30D), then tell the board to close this tab.
+  function vqOpenStats() {
+    for (const e of document.querySelectorAll('.vidiq-scope *, [class*="vidiq"]')) {
+      if ((e.textContent || "").trim() === "View channel stats" && e.children.length === 0) {
+        (e.closest("button,[role=button],div") || e).click();
+        return true;
+      }
+    }
+    return false;
+  }
+  if (location.hash.indexOf("ssscan") >= 0) {
+    let tries = 0;
+    const sIv = setInterval(() => {
+      tries++;
+      const id = vqChannelId();
+      const m7 = id && /Views gained \(7 days\)\s*\+?([\d,]+)/i.exec(vqInlineText());
+      if (m7) {
+        clearInterval(sIv);
+        vqMaybeSave(id, { v7: vqInt(m7[1]) });
+        vqOpenStats();
+        setTimeout(() => vqClick30D(), 1100);
+        setTimeout(() => {
+          const m30 = /Views gained\s*\+?([\d,]+)\s*Daily/i.exec((vqModalText() || "").replace(/\s+/g, " "));
+          if (m30) vqMaybeSave(id, { v30: vqInt(m30[1]) });
+          chrome.runtime.sendMessage({ type: "SS_SCAN_DONE", channelId: id, ok: true });
+        }, 2200);
+      } else if (tries > 26) { // ~18s and vidIQ never appeared
+        clearInterval(sIv);
+        chrome.runtime.sendMessage({ type: "SS_SCAN_DONE", channelId: vqChannelId(), ok: false });
+      }
+    }, 700);
+  }
+
   let lastPath = location.pathname;
   setInterval(() => {
     if (location.pathname !== lastPath) {
