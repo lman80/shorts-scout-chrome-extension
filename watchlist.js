@@ -59,7 +59,7 @@ function load() {
     syncControls();
     render();
     setTimeout(maybeDailyRefresh, 500); // log today's views per niche (once/day)
-    setTimeout(preloadReps, 1500); // warm up hover-to-play for channels with no pick
+    setTimeout(warmRecentStats, 1500); // rep shorts + 7/30-day views per channel
   });
 }
 
@@ -81,6 +81,9 @@ function normalize(c) {
     languages: Array.isArray(c.languages) ? c.languages : [],
     topCandidate: !!c.topCandidate,
     repVideoId: c.repVideoId || "", // the short that represents this channel (hover-to-play)
+    v7: typeof c.v7 === "number" ? c.v7 : null, // views on uploads from the last 7 days
+    v30: typeof c.v30 === "number" ? c.v30 : null, // views on uploads from the last 30 days
+    recentStatsAt: c.recentStatsAt || 0, // when v7/v30 were last computed
     notes: c.notes || "",
     examples: c.examples || [],
   };
@@ -658,36 +661,44 @@ function setRep(c, videoId) {
   toast(c.repVideoId ? "Set as the channel's short" : "Cleared representative short");
 }
 
-// One-time-per-session: grab a representative short for every channel that has
-// none yet, so hover-to-play is instant afterwards. Throttled; best-effort.
-let repsPreloaded = false;
-function preloadReps() {
-  if (repsPreloaded) return;
-  repsPreloaded = true;
-  const todo = state.watchlist.filter((c) => c.channelId && !c.repVideoId);
+// Once per session (when stale): for each channel, fetch its recent uploads to
+// (a) pick a representative short if none is set, and (b) compute views on
+// uploads from the last 7 / 30 days. Throttled; best-effort; cached per channel.
+let statsWarmed = false;
+function warmRecentStats() {
+  if (statsWarmed) return;
+  statsWarmed = true;
+  const now = Date.now();
+  const d7 = now - 7 * 86400e3, d30 = now - 30 * 86400e3;
+  // Refetch channels with no stats yet or stats older than ~20h; always fill a missing rep.
+  const todo = state.watchlist.filter((c) => c.channelId && (!c.recentStatsAt || now - c.recentStatsAt > 20 * 3600e3 || !c.repVideoId || c.v7 == null));
   if (!todo.length) return;
   const total = todo.length;
-  let done = 0, loaded = 0, noKey = false, announced = false;
+  let updated = 0, noKey = false, announced = false;
   const queue = todo.slice();
   const fetchOne = (c) => new Promise((resolve) => {
-    chrome.runtime.sendMessage({ type: "RECENT", channelId: c.channelId, maxItems: 30 }, (res) => {
+    chrome.runtime.sendMessage({ type: "RECENT", channelId: c.channelId, maxItems: 150 }, (res) => {
       if (chrome.runtime.lastError) return resolve();
       if (res && !res.ok && res.error === "NO_API_KEY") { noKey = true; return resolve(); }
-      if (res && res.ok) {
-        const id = repBestShort(res.recent);
-        if (id) { c.repVideoId = id; loaded++; }
+      if (res && res.ok && Array.isArray(res.recent)) {
+        let v7 = 0, v30 = 0;
+        for (const r of res.recent) {
+          if (typeof r.publishedAt !== "number" || typeof r.views !== "number") continue;
+          if (r.publishedAt >= d30) v30 += r.views;
+          if (r.publishedAt >= d7) v7 += r.views;
+        }
+        c.v7 = v7; c.v30 = v30; c.recentStatsAt = now;
+        if (!c.repVideoId) { const id = repBestShort(res.recent); if (id) c.repVideoId = id; }
+        updated++;
+        if (!announced) { announced = true; toast(`Loading recent views… (${total} channels)`); }
       }
-      done++;
-      if (!announced) { announced = true; toast(`Loading channel previews… (${total})`); }
       resolve();
     });
   });
-  const worker = async () => {
-    while (queue.length && !noKey) await fetchOne(queue.shift());
-  };
+  const worker = async () => { while (queue.length && !noKey) await fetchOne(queue.shift()); };
   Promise.all([worker(), worker(), worker(), worker()]).then(() => {
-    if (noKey && !loaded) { toast("Set your YouTube API key (🔑) to preload previews"); return; }
-    if (loaded) { save(); toast(`Previews ready ✓ (${loaded} channels)`); }
+    if (noKey && !updated) { toast("Set your YouTube API key (🔑) to load recent views"); return; }
+    if (updated) { save(); render(); toast(`Recent views ready ✓ (${updated} channels)`); }
   });
 }
 
@@ -746,6 +757,11 @@ function renderCard(c) {
       <span class="pill">▶ <b>${compact(c.totalViews)}</b></span>
       <span class="pill">👤 <b>${compact(c.subscribers)}</b></span>
       <span class="pill">🎬 <b>${compact(c.videoCount)}</b></span>
+    </div>
+
+    <div class="recentviews" title="Views on this channel's uploads from the last 7 / 30 days. Updated daily when the board is open.">
+      <span class="rv"><b>${typeof c.v7 === "number" ? compact(c.v7) : "—"}</b><i>views · 7d</i></span>
+      <span class="rv"><b>${typeof c.v30 === "number" ? compact(c.v30) : "—"}</b><i>views · 30d</i></span>
     </div>
 
     <div class="controls">
