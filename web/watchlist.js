@@ -23,7 +23,7 @@ const ATTR_DIMS = [
 // Stable color per niche (by index) for the column dot.
 const NICHE_COLORS = ["#ff0033", "#4aa8ff", "#ffcb47", "#4ade80", "#c084fc", "#ff8a3d", "#2dd4bf", "#f472b6", "#a3e635", "#60a5fa"];
 
-const state = { watchlist: [], niches: [], nicheParents: {}, tags: [], madeBy: [], madeFor: [], languages: [], savedVideos: [], snapshots: [], sort: "avg", view: "board", search: "", filterTop: false };
+const state = { watchlist: [], niches: [], nicheParents: {}, tags: [], madeBy: [], madeFor: [], languages: [], savedVideos: [], snapshots: [], vidiqStats: {}, sort: "avg", view: "board", search: "", filterTop: false };
 const collapsedSub = new Set(); // collapsed "parent>child" sub-niche sections on the board
 let ignoreNextChange = false;
 const recentCache = {}; // channelId -> { loading } | { recent:[...] } | { error }
@@ -38,8 +38,9 @@ function load() {
   // Ask the background worker to pull the latest from the cloud right away
   // (the periodic alarm also does this every minute). Best-effort.
   try { chrome.runtime.sendMessage({ type: "CLOUD_SYNC" }, () => void chrome.runtime.lastError); } catch (e) {}
-  chrome.storage.local.get(["watchlist", "niches", "nicheParents", "boardPrefs", "savedVideos", "snapshots", "tags", "madeBy", "madeFor", "languages"], (d) => {
+  chrome.storage.local.get(["watchlist", "niches", "nicheParents", "boardPrefs", "savedVideos", "snapshots", "tags", "madeBy", "madeFor", "languages", "vidiqStats"], (d) => {
     state.watchlist = (d.watchlist || []).map(normalize);
+    state.vidiqStats = d.vidiqStats || {};
     state.niches = d.niches || [];
     state.nicheParents = d.nicheParents || {};
     state.tags = d.tags && d.tags.length ? d.tags : DEFAULT_TAGS.slice();
@@ -150,6 +151,7 @@ chrome.storage.onChanged.addListener((changes, area) => {
   if (changes.languages) state.languages = changes.languages.newValue || [];
   if (changes.savedVideos) state.savedVideos = changes.savedVideos.newValue || [];
   if (changes.snapshots) state.snapshots = changes.snapshots.newValue || [];
+  if (changes.vidiqStats) state.vidiqStats = changes.vidiqStats.newValue || {};
   seedNichesFromChannels();
   render();
 });
@@ -716,6 +718,7 @@ function renderCard(c) {
   const avg = avgPerVideo(c);
   const hot = avg >= hotThreshold;
   const handle = c.customUrl ? esc(c.customUrl.startsWith("@") ? c.customUrl : "@" + c.customUrl) : "";
+  const vq = (state.vidiqStats || {})[c.channelId] || {}; // real 7/30-day views from vidIQ
 
   const nicheChipsHtml = (c.niches || []).length
     ? `<div class="card-niches">${(c.niches || []).map((n) => `<span class="nichechip" style="--nc:${nicheColor(n)}">${esc(n)}<b data-rmniche="${esc(n)}" title="Remove">×</b></span>`).join("")}</div>`
@@ -759,9 +762,9 @@ function renderCard(c) {
       <span class="pill">🎬 <b>${compact(c.videoCount)}</b></span>
     </div>
 
-    <div class="recentviews" title="Views on this channel's uploads from the last 7 / 30 days. Updated daily when the board is open.">
-      <span class="rv"><b>${typeof c.v7 === "number" ? compact(c.v7) : "—"}</b><i>views · 7d</i></span>
-      <span class="rv"><b>${typeof c.v30 === "number" ? compact(c.v30) : "—"}</b><i>views · 30d</i></span>
+    <div class="recentviews" title="Real views gained, read from vidIQ. 7-day captures when you open the channel on YouTube; 30-day fills in when you open vidIQ's 'View channel stats'.">
+      <span class="rv${vq.v7 != null ? " has" : ""}"><b>${typeof vq.v7 === "number" ? compact(vq.v7) : "—"}</b><i>views · 7d</i></span>
+      <span class="rv${vq.v30 != null ? " has" : ""}"><b>${typeof vq.v30 === "number" ? compact(vq.v30) : "—"}</b><i>views · 30d</i></span>
     </div>
 
     <div class="controls">

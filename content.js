@@ -939,6 +939,74 @@
   syncVisibility();
   scheduleQuick();
 
+  // ---- vidIQ stats capture --------------------------------------------------
+  // Reads the numbers vidIQ paints onto channel pages — "Views gained (7 days)"
+  // inline, and the 30-day value from its "View channel stats" chart — and saves
+  // them per channel so the board can show real recent-views data. Best-effort:
+  // silently does nothing when vidIQ isn't present.
+  const vqSaved = {}; // channelId -> last-saved {v7, v30}
+  let vqLastModal = { id: null, t: 0 };
+
+  function vqInt(s) { const n = parseInt(String(s).replace(/[^\d]/g, ""), 10); return isFinite(n) ? n : null; }
+  function vqChannelId() {
+    const meta = document.querySelector('meta[itemprop="identifier"], meta[itemprop="channelId"]');
+    if (meta && /^UC[\w-]{20,}$/.test(meta.content || "")) return meta.content;
+    const canon = document.querySelector('link[rel="canonical"]');
+    const m = canon && /\/channel\/(UC[\w-]{20,})/.exec(canon.href || "");
+    return m ? m[1] : null;
+  }
+  function vqInlineText() {
+    for (const e of document.querySelectorAll('.vidiq-scope, [class*="vidiq"]')) {
+      const t = e.innerText || "";
+      if (/Views gained \(7 days\)/i.test(t) && t.length < 2000) return t;
+    }
+    return "";
+  }
+  function vqModalText() {
+    for (const e of document.querySelectorAll('.vidiq-scope, [class*="vidiq"]')) {
+      const t = e.innerText || "";
+      if (/Total views/i.test(t) && /Views gained/i.test(t) && /Daily/i.test(t) && t.length < 5000) return t;
+    }
+    return "";
+  }
+  function vqClick30D() {
+    for (const e of document.querySelectorAll('.vidiq-scope *, [class*="vidiq"]')) {
+      if ((e.textContent || "").trim() === "30D" && e.children.length === 0) {
+        (e.closest("button,[role=button],div") || e).click();
+        return true;
+      }
+    }
+    return false;
+  }
+  function vqMaybeSave(id, patch) {
+    const prev = vqSaved[id] || {};
+    let changed = false;
+    for (const k in patch) if (patch[k] != null && prev[k] !== patch[k]) changed = true;
+    if (!changed) return;
+    vqSaved[id] = Object.assign({}, prev, patch);
+    chrome.storage.local.get(["vidiqStats"], (d) => {
+      const map = d.vidiqStats || {};
+      map[id] = Object.assign({}, map[id], patch, { t: Date.now() });
+      chrome.storage.local.set({ vidiqStats: map });
+    });
+  }
+  function vqTick() {
+    const id = vqChannelId();
+    if (!id) return; // not on a channel page
+    const m7 = /Views gained \(7 days\)\s*\+?([\d,]+)/i.exec(vqInlineText());
+    if (m7) vqMaybeSave(id, { v7: vqInt(m7[1]) });
+    // 30-day: only when the user has the channel-stats modal open
+    if (vqModalText() && (vqLastModal.id !== id || Date.now() - vqLastModal.t > 5000)) {
+      vqLastModal = { id, t: Date.now() };
+      vqClick30D();
+      setTimeout(() => {
+        const m30 = /Views gained\s*\+?([\d,]+)\s*Daily/i.exec((vqModalText() || "").replace(/\s+/g, " "));
+        if (m30) vqMaybeSave(id, { v30: vqInt(m30[1]) });
+      }, 700);
+    }
+  }
+  setInterval(vqTick, 1500);
+
   let lastPath = location.pathname;
   setInterval(() => {
     if (location.pathname !== lastPath) {

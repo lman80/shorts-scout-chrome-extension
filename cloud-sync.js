@@ -19,7 +19,8 @@
 
   // Keys that mirror between extension <-> website. Must match cloud-app.js.
   var SYNC_KEYS = ["watchlist", "niches", "nicheParents", "tags", "madeBy",
-                   "madeFor", "languages", "savedVideos", "snapshots", "notebookMd"];
+                   "madeFor", "languages", "savedVideos", "snapshots", "notebookMd",
+                   "vidiqStats"];
 
   var suppressPushUntil = 0;   // ignore storage events we caused by pulling
   var pushTimer = null;
