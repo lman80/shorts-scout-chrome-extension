@@ -2152,39 +2152,11 @@ function renderTopCandidates() {
   head.className = "tc-head";
   head.innerHTML = `★ Top Candidates <span>${cands.length} · ranked by views in the last 7 days</span>`;
   wrap.appendChild(head);
-  cands.forEach((c, i) => wrap.appendChild(renderTopCard(c, i + 1)));
+  const grid = document.createElement("div");
+  grid.className = "tc-grid";
+  cands.forEach((c) => grid.appendChild(renderCard(c))); // same card as the board
+  wrap.appendChild(grid);
   return wrap;
-}
-
-function renderTopCard(c, rank) {
-  const el = document.createElement("div");
-  el.className = "tc-card";
-  const mom = vqMomentum(c);
-  const momHtml = mom == null ? "" : `<span class="tc-mom ${mom >= 1.1 ? "up" : mom <= 0.9 ? "down" : "flat"}">${mom >= 1.1 ? "🔥" : mom <= 0.9 ? "❄️" : "→"} ${mom >= 1 ? "+" : ""}${Math.round((mom - 1) * 100)}%</span>`;
-  const niches = (c.niches || []).map((n) => `<span class="tc-niche" style="background:${nicheColor(n)}">${esc(n)}</span>`).join("");
-  el.innerHTML = `
-    <div class="tc-rank">#${rank}</div>
-    ${avatarHtml(c, "tc-av")}
-    <div class="tc-body">
-      <div class="tc-row1">
-        <a class="tc-name" href="${channelUrl(c)}" target="_blank" rel="noopener">${esc(c.title) || "Channel"}</a>
-        <button class="tc-star" title="Remove from top candidates">★</button>
-      </div>
-      ${niches ? `<div class="tc-niches">${niches}</div>` : ""}
-      <div class="tc-stats">
-        <span class="tc-stat hot"><b>${vq7(c) ? compact(vq7(c)) : "—"}</b> views · 7d ${momHtml}</span>
-        <span class="tc-stat"><b>${vq30(c) ? compact(vq30(c)) : "—"}</b> · 30d</span>
-        <span class="tc-stat"><b>${compact(avgPerVideo(c))}</b> avg/video</span>
-        <span class="tc-stat"><b>${compact(c.subscribers)}</b> subs</span>
-        <span class="tc-stat"><b>${compact(c.totalViews)}</b> total</span>
-      </div>
-      <textarea class="tc-notes" placeholder="Notes — the format, the hook, why it works, what to copy…">${esc(c.notes || "")}</textarea>
-      <div class="tc-actions"><button class="tc-review">▶ Review shorts</button></div>
-    </div>`;
-  el.querySelector(".tc-star").onclick = () => { c.topCandidate = false; save(); render(); };
-  el.querySelector(".tc-notes").onchange = (e) => { c.notes = e.target.value; save(); };
-  el.querySelector(".tc-review").onclick = () => openReview(c.channelId);
-  return el;
 }
 
 function renderVideos() {
