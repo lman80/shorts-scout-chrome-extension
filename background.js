@@ -1,6 +1,9 @@
 // background.js — service worker. All YouTube Data API calls happen here so they
 // aren't subject to youtube.com's page CSP, and the API key never lives in the page.
 
+// Two-way cloud sync with the website (shared Firestore board). See cloud-sync.js.
+importScripts("cloud-sync.js");
+
 const API = "https://www.googleapis.com/youtube/v3";
 
 // Best-effort in-memory cache of channels for this session, keyed by channelId.

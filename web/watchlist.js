@@ -35,6 +35,9 @@ let hotThreshold = Infinity; // 75th percentile of avg/video, computed each rend
 // ---- storage ---------------------------------------------------------------
 
 function load() {
+  // Ask the background worker to pull the latest from the cloud right away
+  // (the periodic alarm also does this every minute). Best-effort.
+  try { chrome.runtime.sendMessage({ type: "CLOUD_SYNC" }, () => void chrome.runtime.lastError); } catch (e) {}
   chrome.storage.local.get(["watchlist", "niches", "nicheParents", "boardPrefs", "savedVideos", "snapshots", "tags", "madeBy", "madeFor", "languages"], (d) => {
     state.watchlist = (d.watchlist || []).map(normalize);
     state.niches = d.niches || [];

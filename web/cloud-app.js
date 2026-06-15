@@ -88,6 +88,7 @@
     writeTimer = setTimeout(async () => {
       const payload = {};
       Object.keys(cloudData).forEach((k) => { if (!LOCAL_KEYS.has(k)) payload[k] = cloudData[k]; });
+      payload._rev = Date.now(); // lets the extension detect this change and pull it
       try {
         await DOC.set(payload, { merge: true });
         setStatus("Saved ✓");
