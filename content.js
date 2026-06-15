@@ -1020,26 +1020,39 @@
     return false;
   }
   if (location.hash.indexOf("ssscan") >= 0) {
-    let tries = 0;
-    const sIv = setInterval(() => {
-      tries++;
+    const scanDone2 = (id, ok) => chrome.runtime.sendMessage({ type: "SS_SCAN_DONE", channelId: id, ok: ok });
+    // Phase 1: poll fast for vidIQ's inline 7-day number.
+    let t1 = 0;
+    const iv1 = setInterval(() => {
+      t1++;
       const id = vqChannelId();
       const m7 = id && /Views gained \(7 days\)\s*\+?([\d,]+)/i.exec(vqInlineText());
       if (m7) {
-        clearInterval(sIv);
+        clearInterval(iv1);
         vqMaybeSave(id, { v7: vqInt(m7[1]) });
+        // Phase 2: open the stats popup, flip to 30D, read it — as soon as ready.
         vqOpenStats();
-        setTimeout(() => vqClick30D(), 1100);
-        setTimeout(() => {
-          const m30 = /Views gained\s*\+?([\d,]+)\s*Daily/i.exec((vqModalText() || "").replace(/\s+/g, " "));
-          if (m30) vqMaybeSave(id, { v30: vqInt(m30[1]) });
-          chrome.runtime.sendMessage({ type: "SS_SCAN_DONE", channelId: id, ok: true });
-        }, 2200);
-      } else if (tries > 26) { // ~18s and vidIQ never appeared
-        clearInterval(sIv);
-        chrome.runtime.sendMessage({ type: "SS_SCAN_DONE", channelId: vqChannelId(), ok: false });
+        let t2 = 0, clicked = false, settle = 0;
+        const iv2 = setInterval(() => {
+          t2++;
+          if (vqModalText()) {
+            if (!clicked) { vqClick30D(); clicked = true; settle = 0; return; }
+            if (++settle >= 3) { // ~450ms after the 30D click for the chart to update
+              clearInterval(iv2);
+              const m30 = /Views gained\s*\+?([\d,]+)\s*Daily/i.exec((vqModalText() || "").replace(/\s+/g, " "));
+              if (m30) vqMaybeSave(id, { v30: vqInt(m30[1]) });
+              scanDone2(id, true);
+            }
+          } else if (t2 > 34) { // ~5s and the popup never rendered — keep the 7-day we got
+            clearInterval(iv2);
+            scanDone2(id, true);
+          }
+        }, 150);
+      } else if (t1 > 40) { // ~12s and vidIQ never appeared
+        clearInterval(iv1);
+        scanDone2(vqChannelId(), false);
       }
-    }, 700);
+    }, 300);
   }
 
   let lastPath = location.pathname;
