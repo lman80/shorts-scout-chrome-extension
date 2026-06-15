@@ -10,6 +10,7 @@
   let autoShow = true; // toggled from settings
   let watchlist = []; // saved channels, mirrored from chrome.storage.local
   let niches = []; // niche column names, mirrored from storage
+  let nicheParents = {}; // child niche -> parent niche, mirrored from storage
   let savedVideos = []; // individually saved shorts, mirrored from storage
   let collapsed = false; // when true, the panel stays hidden until reopened via the dock button
   let tags = []; // available tag names, mirrored from storage
@@ -389,7 +390,6 @@
       sel[dim.field] = (init || []).slice();
     });
 
-    const nicheChipsHtml = niches.map((n) => `<button class="ssct-chip2${selNiches.includes(n) ? " on" : ""}" data-niche="${esc(n)}">${esc(n)}</button>`).join("");
     const dimBtns = SHEET_DIMS.map(
       (dim) => `<button class="msd-btn" type="button" data-field="${dim.field}">${dim.label}<span class="msd-count" data-cnt="${dim.field}">${sel[dim.field].length || ""}</span><span class="msd-caret">▾</span></button>`
     ).join("");
@@ -399,8 +399,8 @@
         <div class="ssct-sheet-title">${existing ? "Edit saved channel" : "Save channel"}</div>
         <div class="ssct-channel-name">${esc(channel.title) || "Channel"}</div>
         <button class="ssct-topcand${selTop ? " on" : ""}" type="button" data-act="top">${selTop ? "★ Top candidate" : "☆ Mark as top candidate"}</button>
-        <div class="ssct-label">Niches <span style="text-transform:none;letter-spacing:0;color:#777">— select any</span></div>
-        <div class="ssct-chips2" data-group="niche">${nicheChipsHtml}<button class="ssct-chip2 new" data-newniche>＋ New</button></div>
+        <div class="ssct-label">Niches <span style="text-transform:none;letter-spacing:0;color:#777">— tap a main niche to open its sub-niches</span></div>
+        <div class="ssct-chips2" data-group="niche"></div>
         <div class="ssct-label">Labels</div>
         <div class="msd-wrap"><div class="msd-row">${dimBtns}</div><div class="msd-panel"></div></div>
         <div class="ssct-label">Notes</div>
@@ -423,26 +423,44 @@
       topBtn.textContent = selTop ? "★ Top candidate" : "☆ Mark as top candidate";
     };
 
+    // Niches grouped by main niche → sub-niches, alphabetical. Tap a main niche
+    // to drop down its sub-niches; tap any to (de)select.
     const nicheWrap = panel.querySelector('[data-group="niche"]');
-    nicheWrap.querySelectorAll("[data-niche]").forEach((b) => {
-      b.onclick = () => {
-        const n = b.dataset.niche;
-        const i = selNiches.indexOf(n);
-        if (i >= 0) selNiches.splice(i, 1);
-        else selNiches.push(n);
-        b.classList.toggle("on");
+    const nicheExpanded = new Set();
+    const subNichesOf = (parent) => niches.filter((n) => nicheParents[n] === parent).sort((a, b) => a.localeCompare(b));
+    function renderNiches() {
+      const parentVals = Object.values(nicheParents).filter(Boolean);
+      const topLevel = Array.from(new Set(niches.filter((n) => !nicheParents[n]).concat(parentVals)))
+        .sort((a, b) => a.localeCompare(b));
+      const html = topLevel.map((n) => {
+        const kids = subNichesOf(n);
+        if (!kids.length) {
+          return `<button class="ssct-chip2${selNiches.includes(n) ? " on" : ""}" data-niche="${esc(n)}">${esc(n)}</button>`;
+        }
+        const members = [n].concat(kids);
+        const cnt = members.filter((m) => selNiches.includes(m)).length;
+        const open = nicheExpanded.has(n);
+        const subs = members.map((m) => `<button class="ssct-chip2 sub${selNiches.includes(m) ? " on" : ""}" data-niche="${esc(m)}">${esc(m === n ? m + " · all" : m)}</button>`).join("");
+        return `<div class="ssct-nichegrp${open ? " open" : ""}">` +
+          `<button class="ssct-chip2 parent${cnt ? " has" : ""}" data-parent="${esc(n)}">${esc(n)} <span class="ssct-caret">▾</span>${cnt ? `<span class="ssct-cnt">${cnt}</span>` : ""}</button>` +
+          `<div class="ssct-subniches"${open ? "" : " hidden"}>${subs}</div></div>`;
+      }).join("");
+      nicheWrap.innerHTML = html + `<button class="ssct-chip2 new" data-newniche>＋ New</button>`;
+      nicheWrap.querySelectorAll("[data-parent]").forEach((b) => {
+        b.onclick = () => { const p = b.dataset.parent; nicheExpanded.has(p) ? nicheExpanded.delete(p) : nicheExpanded.add(p); renderNiches(); };
+      });
+      nicheWrap.querySelectorAll("[data-niche]").forEach((b) => {
+        b.onclick = () => { const n = b.dataset.niche; const i = selNiches.indexOf(n); if (i >= 0) selNiches.splice(i, 1); else selNiches.push(n); renderNiches(); };
+      });
+      nicheWrap.querySelector("[data-newniche]").onclick = () => {
+        const name = (prompt("New niche name:") || "").trim();
+        if (!name) return;
+        if (!niches.includes(name)) { niches.push(name); chrome.storage.local.set({ niches }); }
+        if (!selNiches.includes(name)) selNiches.push(name);
+        renderNiches();
       };
-    });
-    nicheWrap.querySelector("[data-newniche]").onclick = () => {
-      const name = (prompt("New niche name:") || "").trim();
-      if (!name) return;
-      if (!niches.includes(name)) {
-        niches.push(name);
-        chrome.storage.local.set({ niches });
-      }
-      if (!selNiches.includes(name)) selNiches.push(name);
-      openSaveSheet(channel, reopenDraft());
-    };
+    }
+    renderNiches();
 
     // Compact label dropdowns: a row of buttons, each reveals its options inline below.
     const msdPanel = panel.querySelector(".msd-panel");
@@ -899,9 +917,10 @@
     syncVisibility();
     scheduleQuick();
   });
-  chrome.storage.local.get(["watchlist", "niches", "savedVideos", "panelCollapsed", "tags", "madeBy", "madeFor", "languages"], (data) => {
+  chrome.storage.local.get(["watchlist", "niches", "nicheParents", "savedVideos", "panelCollapsed", "tags", "madeBy", "madeFor", "languages"], (data) => {
     watchlist = data.watchlist || [];
     niches = data.niches || [];
+    nicheParents = data.nicheParents || {};
     savedVideos = data.savedVideos || [];
     collapsed = !!data.panelCollapsed;
     tags = data.tags && data.tags.length ? data.tags : DEFAULT_TAGS.slice();
@@ -923,6 +942,7 @@
       updateWatchCount();
     }
     if (area === "local" && changes.niches) niches = changes.niches.newValue || [];
+    if (area === "local" && changes.nicheParents) nicheParents = changes.nicheParents.newValue || {};
     if (area === "local" && changes.tags) tags = changes.tags.newValue || [];
     if (area === "local" && changes.madeBy) madeBy = changes.madeBy.newValue || [];
     if (area === "local" && changes.madeFor) madeFor = changes.madeFor.newValue || [];
