@@ -18,8 +18,7 @@
   ],
   "options_page": "options.html",
   "action": {
-    "default_title": "Shorts Scout — set your API key",
-    "default_popup": "options.html"
+    "default_title": "Shorts Scout — open watchlist board"
   },
   "icons": {
     "128": "icon128.png"

@@ -340,3 +340,17 @@ chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
   })();
   return true; // keep the message channel open for the async response
 });
+
+// Clicking the toolbar icon opens the watchlist board (focusing it if already open).
+chrome.action.onClicked.addListener(() => {
+  const url = chrome.runtime.getURL("watchlist.html");
+  chrome.tabs.query({}, (tabs) => {
+    const existing = (tabs || []).find((t) => t.url && t.url.indexOf(url) === 0);
+    if (existing) {
+      chrome.tabs.update(existing.id, { active: true });
+      if (existing.windowId != null) chrome.windows.update(existing.windowId, { focused: true });
+    } else {
+      chrome.tabs.create({ url });
+    }
+  });
+});
