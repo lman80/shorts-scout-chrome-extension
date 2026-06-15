@@ -47,11 +47,14 @@ personal use with no credit card and no subscription.
   that domain to Firebase Authorized domains.
 
 ### 6. First run
-1. Open your site → **Sign in with Google**.
+The site runs in **open mode** — no sign-in. Anyone with the URL can view/edit the one shared
+board, so keep the URL private.
+1. Open your site → the board loads immediately.
 2. Click **🔑 API key** (bottom-right) → paste your YouTube Data API v3 key (the same one the
-   extension uses) so Refresh / Recent shorts / Analytics work.
+   extension uses) so Refresh / Recent shorts / Analytics work. *Stored on this device only —
+   never written into the shared data.*
 3. Click **⬆ Import** → in the extension, use **⋯ More → Export**, open the `.md`, and paste the
-   block under "Raw data" (or the whole file's JSON) to migrate your existing board into the cloud.
+   block under "Raw data" (or the whole file's JSON) to load your existing board into the cloud.
 
 ## Notes
 - **Notebook screenshots** stay on the device that pasted them for now (a single Firestore

@@ -1,14 +1,15 @@
 /* cloud-app.js — turns the Shorts Scout board into a standalone website.
  *
+ * OPEN MODE: no sign-in. The board lives in one shared Firestore document
+ * (boards/shared) that anyone with the site URL can read & write. Keep the URL
+ * private. Your YouTube API key is kept on this device only (localStorage), so
+ * it is never written into the public shared document.
+ *
  * It provides a real `window.chrome` shim so the EXACT extension board code
  * (watchlist.js) runs unchanged:
  *   - chrome.storage.local  -> Firestore (synced across all your devices)
  *   - chrome.runtime.sendMessage(RECENT / REFRESH_CHANNELS / OPEN_TAB) -> direct YouTube API
  *   - chrome.tabs / chrome.windows -> window.open
- *
- * Data lives in your own Firebase project (free). Sign in with Google to access
- * it anywhere. Notebook screenshots stay on the device that pasted them for now
- * (Firestore docs cap at 1MB); everything else syncs.
  */
 (function () {
   // ---- Firebase init -------------------------------------------------------
@@ -19,17 +20,18 @@
     return;
   }
   firebase.initializeApp(window.FIREBASE_CONFIG);
-  const auth = firebase.auth();
   const db = firebase.firestore();
+  const DOC = db.collection("boards").doc("shared"); // the one shared open board
 
-  let uid = null;
   let cloudData = {}; // mirrors chrome.storage.local
   const listeners = [];
   let booted = false;
   let writeTimer = null;
 
-  // notebookImages are kept per-device in localStorage (too big for one Firestore doc)
-  const LOCAL_KEYS = new Set(["notebookImages"]);
+  // Kept per-device in localStorage (never written to the public shared doc):
+  //  - notebookImages: too big for one Firestore doc (1MB cap)
+  //  - apiKey: secret-ish; don't expose it in world-readable data
+  const LOCAL_KEYS = new Set(["notebookImages", "apiKey"]);
   function loadLocalKeys() {
     LOCAL_KEYS.forEach((k) => {
       try { const v = localStorage.getItem("ss_" + k); if (v != null) cloudData[k] = JSON.parse(v); } catch (e) {}
@@ -84,11 +86,10 @@
     clearTimeout(writeTimer);
     setStatus("Saving…");
     writeTimer = setTimeout(async () => {
-      if (!uid) return;
       const payload = {};
       Object.keys(cloudData).forEach((k) => { if (!LOCAL_KEYS.has(k)) payload[k] = cloudData[k]; });
       try {
-        await db.collection("boards").doc(uid).set(payload, { merge: true });
+        await DOC.set(payload, { merge: true });
         setStatus("Saved ✓");
       } catch (e) {
         setStatus("Save failed");
@@ -100,6 +101,7 @@
   function applyRemote(data) {
     const changes = {};
     Object.keys(data || {}).forEach((k) => {
+      if (LOCAL_KEYS.has(k)) return;
       if (JSON.stringify(cloudData[k]) !== JSON.stringify(data[k])) {
         changes[k] = { newValue: data[k] };
         cloudData[k] = data[k];
@@ -180,7 +182,7 @@
     return { ok: true };
   }
 
-  // ---- account / settings UI ----------------------------------------------
+  // ---- gate / account / settings UI ---------------------------------------
   function showGate(inner) {
     let g = document.getElementById("cloud-gate");
     if (!g) { g = document.createElement("div"); g.id = "cloud-gate"; document.body.appendChild(g); }
@@ -189,25 +191,16 @@
   }
   function hideGate() { const g = document.getElementById("cloud-gate"); if (g) g.style.display = "none"; }
 
-  function signInUI() {
-    showGate(`<h1>Shorts Scout</h1><p>Your watchlist, anywhere. Sign in to load your board.</p>
-      <button class="cg-btn" id="cg-signin">Sign in with Google</button>`);
-    document.getElementById("cg-signin").onclick = () => auth.signInWithPopup(new firebase.auth.GoogleAuthProvider()).catch((e) => showGate(`<h2>Sign-in failed</h2><p>${e.message}</p><button class="cg-btn" id="cg-signin">Try again</button>`) || signInUI());
-  }
-
-  function mountAccountBar(user) {
+  function mountAccountBar() {
     let bar = document.getElementById("cloud-acct");
     if (!bar) { bar = document.createElement("div"); bar.id = "cloud-acct"; document.body.appendChild(bar); }
     bar.innerHTML = `
       <span class="ca-status" id="cloud-status"></span>
-      <button class="ca-btn" id="ca-key" title="Set YouTube API key">🔑 API key</button>
-      <button class="ca-btn" id="ca-import" title="Import data from the extension's Export">⬆ Import</button>
-      <img class="ca-av" src="${user.photoURL || ""}" alt="" referrerpolicy="no-referrer"/>
-      <button class="ca-btn" id="ca-out">Sign out</button>`;
-    document.getElementById("ca-out").onclick = () => auth.signOut();
+      <button class="ca-btn" id="ca-key" title="Set YouTube API key (stored on this device only)">🔑 API key</button>
+      <button class="ca-btn" id="ca-import" title="Import data from the extension's Export">⬆ Import</button>`;
     document.getElementById("ca-key").onclick = () => {
-      const k = prompt("Paste your YouTube Data API v3 key:", cloudData.apiKey || "");
-      if (k != null) { chrome.storage.local.set({ apiKey: k.trim() }); alert("Saved. Refresh stats / analytics now work."); }
+      const k = prompt("Paste your YouTube Data API v3 key (kept on this device only):", cloudData.apiKey || "");
+      if (k != null) { chrome.storage.local.set({ apiKey: k.trim() }); alert("Saved on this device. Refresh stats / analytics now work."); }
     };
     document.getElementById("ca-import").onclick = importData;
   }
@@ -225,7 +218,7 @@
     const obj = {};
     keys.forEach((k) => { if (data[k] !== undefined) obj[k] = data[k]; });
     if (!Object.keys(obj).length) return alert("No recognizable watchlist data found.");
-    if (!confirm(`Import ${(obj.watchlist || []).length} channels and overwrite the current cloud board?`)) return;
+    if (!confirm(`Import ${(obj.watchlist || []).length} channels and overwrite the current board?`)) return;
     chrome.storage.local.set(obj);
     alert("Imported. Your board should populate now.");
   }
@@ -241,18 +234,13 @@
   }
 
   document.addEventListener("DOMContentLoaded", () => {
-    signInUI();
-    auth.onAuthStateChanged((user) => {
-      if (!user) { uid = null; booted = false; showGate && signInUI(); return; }
-      uid = user.uid;
-      loadLocalKeys();
-      mountAccountBar(user);
-      db.collection("boards").doc(uid).onSnapshot((snap) => {
-        if (snap.metadata.hasPendingWrites) return; // ignore our own writes
-        const data = snap.data() || {};
-        if (!booted) { Object.assign(cloudData, data); bootBoard(); }
-        else applyRemote(data);
-      }, (err) => { console.error(err); showGate(`<h2>Couldn't load your data</h2><p>${err.message}</p>`); });
-    });
+    showGate(`<h1>Shorts Scout</h1><p>Loading your board…</p>`);
+    loadLocalKeys();
+    DOC.onSnapshot((snap) => {
+      if (snap.metadata.hasPendingWrites) return; // ignore our own writes
+      const data = snap.data() || {};
+      if (!booted) { Object.assign(cloudData, data); mountAccountBar(); bootBoard(); }
+      else applyRemote(data);
+    }, (err) => { console.error(err); showGate(`<h2>Couldn't load the board</h2><p>${err.message}</p>`); });
   });
 })();
