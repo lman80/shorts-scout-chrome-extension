@@ -990,6 +990,22 @@
       chrome.storage.local.set({ vidiqStats: map });
     });
   }
+  // Append a permanent history point (kept per channel) so trends survive forever.
+  function vqAppendHistory(id) {
+    chrome.storage.local.get(["vidiqStats", "vidiqHistory"], (d) => {
+      const st = (d.vidiqStats || {})[id];
+      if (!st || (st.v7 == null && st.v30 == null)) return;
+      const hist = d.vidiqHistory || {};
+      const arr = hist[id] || [];
+      const now = Date.now();
+      const point = { t: now, v7: st.v7 != null ? st.v7 : null, v30: st.v30 != null ? st.v30 : null };
+      const last = arr[arr.length - 1];
+      if (last && now - last.t < 12 * 3600e3) arr[arr.length - 1] = point; // same day → replace
+      else arr.push(point);
+      hist[id] = arr.slice(-80);
+      chrome.storage.local.set({ vidiqHistory: hist });
+    });
+  }
   function vqTick() {
     const id = vqChannelId();
     if (!id) return; // not on a channel page
@@ -1020,39 +1036,40 @@
     return false;
   }
   if (location.hash.indexOf("ssscan") >= 0) {
-    const scanDone2 = (id, ok) => chrome.runtime.sendMessage({ type: "SS_SCAN_DONE", channelId: id, ok: ok });
-    // Phase 1: poll fast for vidIQ's inline 7-day number.
-    let t1 = 0;
-    const iv1 = setInterval(() => {
-      t1++;
+    const startedAt = Date.now();
+    let got7 = false, got30 = false, modalOpened = false, clicked = false, settle = 0, done = false;
+    function finishScan() {
+      if (done) return; done = true;
+      clearInterval(iv);
       const id = vqChannelId();
-      const m7 = id && /Views gained \(7 days\)\s*\+?([\d,]+)/i.exec(vqInlineText());
-      if (m7) {
-        clearInterval(iv1);
-        vqMaybeSave(id, { v7: vqInt(m7[1]) });
-        // Phase 2: open the stats popup, flip to 30D, read it — as soon as ready.
-        vqOpenStats();
-        let t2 = 0, clicked = false, settle = 0;
-        const iv2 = setInterval(() => {
-          t2++;
-          if (vqModalText()) {
-            if (!clicked) { vqClick30D(); clicked = true; settle = 0; return; }
-            if (++settle >= 3) { // ~450ms after the 30D click for the chart to update
-              clearInterval(iv2);
-              const m30 = /Views gained\s*\+?([\d,]+)\s*Daily/i.exec((vqModalText() || "").replace(/\s+/g, " "));
-              if (m30) vqMaybeSave(id, { v30: vqInt(m30[1]) });
-              scanDone2(id, true);
-            }
-          } else if (t2 > 34) { // ~5s and the popup never rendered — keep the 7-day we got
-            clearInterval(iv2);
-            scanDone2(id, true);
-          }
-        }, 150);
-      } else if (t1 > 40) { // ~12s and vidIQ never appeared
-        clearInterval(iv1);
-        scanDone2(vqChannelId(), false);
+      if (id && (got7 || got30)) vqAppendHistory(id);
+      chrome.runtime.sendMessage({ type: "SS_SCAN_DONE", channelId: id, got7: got7, got30: got30 });
+    }
+    const iv = setInterval(() => {
+      const id = vqChannelId();
+      const elapsed = Date.now() - startedAt;
+      if (!id) { if (elapsed > 22000) finishScan(); return; }
+      // 7-day (inline) — keep trying until we get it
+      if (!got7) {
+        const m7 = /Views gained \(7 days\)\s*\+?([\d,]+)/i.exec(vqInlineText());
+        if (m7) { got7 = true; vqMaybeSave(id, { v7: vqInt(m7[1]) }); }
       }
-    }, 300);
+      // 30-day (open stats popup, flip to 30D, read) — only after vidIQ is up
+      if (!got30 && (got7 || elapsed > 4000)) {
+        if (!modalOpened) { vqOpenStats(); modalOpened = true; }
+        else if (vqModalText()) {
+          if (!clicked) { vqClick30D(); clicked = true; settle = 0; }
+          else if (++settle >= 2) { // let the chart update after the 30D click
+            const m30 = /Views gained\s*\+?([\d,]+)\s*Daily/i.exec((vqModalText() || "").replace(/\s+/g, " "));
+            if (m30) { got30 = true; vqMaybeSave(id, { v30: vqInt(m30[1]) }); }
+          }
+        } else if (clicked === false && elapsed > 8000) {
+          vqOpenStats(); // popup didn't open — try again
+        }
+      }
+      if (got7 && got30) finishScan();
+      else if (elapsed > 22000) finishScan(); // give up this round; the board will retry
+    }, 250);
   }
 
   let lastPath = location.pathname;

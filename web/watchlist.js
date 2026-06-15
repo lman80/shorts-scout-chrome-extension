@@ -23,7 +23,7 @@ const ATTR_DIMS = [
 // Stable color per niche (by index) for the column dot.
 const NICHE_COLORS = ["#ff0033", "#4aa8ff", "#ffcb47", "#4ade80", "#c084fc", "#ff8a3d", "#2dd4bf", "#f472b6", "#a3e635", "#60a5fa"];
 
-const state = { watchlist: [], niches: [], nicheParents: {}, tags: [], madeBy: [], madeFor: [], languages: [], savedVideos: [], snapshots: [], vidiqStats: {}, sort: "avg", view: "board", search: "", filterTop: false };
+const state = { watchlist: [], niches: [], nicheParents: {}, tags: [], madeBy: [], madeFor: [], languages: [], savedVideos: [], snapshots: [], vidiqStats: {}, vidiqHistory: {}, sort: "avg", view: "board", search: "", filterTop: false };
 const collapsedSub = new Set(); // collapsed "parent>child" sub-niche sections on the board
 let ignoreNextChange = false;
 const recentCache = {}; // channelId -> { loading } | { recent:[...] } | { error }
@@ -38,9 +38,10 @@ function load() {
   // Ask the background worker to pull the latest from the cloud right away
   // (the periodic alarm also does this every minute). Best-effort.
   try { chrome.runtime.sendMessage({ type: "CLOUD_SYNC" }, () => void chrome.runtime.lastError); } catch (e) {}
-  chrome.storage.local.get(["watchlist", "niches", "nicheParents", "boardPrefs", "savedVideos", "snapshots", "tags", "madeBy", "madeFor", "languages", "vidiqStats"], (d) => {
+  chrome.storage.local.get(["watchlist", "niches", "nicheParents", "boardPrefs", "savedVideos", "snapshots", "tags", "madeBy", "madeFor", "languages", "vidiqStats", "vidiqHistory"], (d) => {
     state.watchlist = (d.watchlist || []).map(normalize);
     state.vidiqStats = d.vidiqStats || {};
+    state.vidiqHistory = d.vidiqHistory || {};
     state.niches = d.niches || [];
     state.nicheParents = d.nicheParents || {};
     state.tags = d.tags && d.tags.length ? d.tags : DEFAULT_TAGS.slice();
@@ -152,6 +153,7 @@ chrome.storage.onChanged.addListener((changes, area) => {
   if (changes.savedVideos) state.savedVideos = changes.savedVideos.newValue || [];
   if (changes.snapshots) state.snapshots = changes.snapshots.newValue || [];
   if (changes.vidiqStats) state.vidiqStats = changes.vidiqStats.newValue || {};
+  if (changes.vidiqHistory) state.vidiqHistory = changes.vidiqHistory.newValue || {};
   seedNichesFromChannels();
   render();
 });
@@ -209,6 +211,17 @@ function timeAgo(ms) {
   return `${Math.floor(h / 24)}d ago`;
 }
 
+// vidIQ recent-views helpers
+function vq7(c) { const s = (state.vidiqStats || {})[c.channelId]; return s && typeof s.v7 === "number" ? s.v7 : 0; }
+function vq30(c) { const s = (state.vidiqStats || {})[c.channelId]; return s && typeof s.v30 === "number" ? s.v30 : 0; }
+// Momentum: recent daily pace (7d) vs monthly daily pace (30d). >1 = heating up.
+function vqMomentum(c) {
+  const s = (state.vidiqStats || {})[c.channelId];
+  if (!s || typeof s.v7 !== "number" || typeof s.v30 !== "number" || s.v30 <= 0) return null;
+  const pace7 = s.v7 / 7, pace30 = s.v30 / 30;
+  if (pace30 <= 0) return null;
+  return pace7 / pace30;
+}
 function sortKey() {
   return {
     avg: avgPerVideo,
@@ -217,6 +230,9 @@ function sortKey() {
     subs: (c) => c.subscribers,
     videos: (c) => c.videoCount,
     added: (c) => c.addedAt,
+    v7: vq7,
+    v30: vq30,
+    momentum: (c) => vqMomentum(c) || 0,
   }[state.sort];
 }
 function sortChannels(list) {
@@ -667,53 +683,63 @@ function setRep(c, videoId) {
 // Open a channel in a hidden background tab, let vidIQ load, capture its 7/30-day
 // views (content.js does the reading), then close the tab — so you don't have to
 // visit each channel by hand. Runs one at a time.
-let scanQueue = [], scanning = false, scanTotal = 0, scanDone = 0, scanCancelled = false;
+const SCAN_CONCURRENCY = 15; // scan this many channels at once
+const SCAN_MAX_ATTEMPTS = 4;  // retry a channel until BOTH 7d and 30d are captured
+let scanQueue = [], scanning = false, scanTotalUnique = 0, scanCompleted = 0, scanCancelled = false;
+let scanAttempts = {};
 function scanChannel(id) { scanMany([id]); }
 function scanMany(ids) {
   ids = (ids || []).filter(Boolean);
   if (!IS_EXTENSION) { toast("Scanning runs in the extension board (it opens YouTube + vidIQ)."); return; }
   if (!ids.length) return;
-  scanQueue.push(...ids);
-  scanTotal += ids.length;
+  ids.forEach((id) => { if (scanAttempts[id] == null) scanAttempts[id] = 0; scanQueue.push(id); });
+  scanTotalUnique += ids.length;
   if (!scanning) runScanQueue();
 }
-function cancelScan() { scanQueue = []; scanCancelled = true; toast("Stopping after this channel…"); }
+function cancelScan() { scanQueue = []; scanCancelled = true; toast("Stopping…"); }
 function updateScanBtn() {
   const lbl = document.getElementById("scanAllLabel");
   const btn = document.getElementById("scanAllTop");
-  if (lbl) lbl.textContent = scanning ? `Stop · ${scanDone}/${scanTotal}` : "Scan vidIQ";
+  if (lbl) lbl.textContent = scanning ? `Stop · ${scanCompleted}/${scanTotalUnique}` : "Scan vidIQ";
   if (btn) btn.classList.toggle("scanning", scanning);
 }
-const SCAN_CONCURRENCY = 8; // scan this many channels at once (≈10× faster than one-by-one)
 async function runScanQueue() {
   scanning = true; scanCancelled = false; updateScanBtn();
   await Promise.all(Array.from({ length: SCAN_CONCURRENCY }, () => scanWorker()));
   const stopped = scanCancelled;
-  scanning = false; scanTotal = 0; scanDone = 0; scanCancelled = false;
+  let incomplete = 0;
+  if (!stopped) {
+    const vs = state.vidiqStats || {};
+    Object.keys(scanAttempts).forEach((id) => { const s = vs[id] || {}; if (s.v7 == null || s.v30 == null) incomplete++; });
+  }
+  scanning = false; scanTotalUnique = 0; scanCompleted = 0; scanCancelled = false; scanAttempts = {};
   updateScanBtn();
   render();
-  toast(stopped ? "Scan stopped" : "Scan complete ✓");
+  toast(stopped ? "Scan stopped" : incomplete ? `Scan done — ${incomplete} couldn't be read (try again)` : "Scan complete ✓ all captured");
 }
 async function scanWorker() {
   while (scanQueue.length && !scanCancelled) {
     const id = scanQueue.shift();
-    scanDone++;
+    scanAttempts[id] = (scanAttempts[id] || 0) + 1;
+    const res = await scanOne(id);
+    if (res.got7 && res.got30) { scanCompleted++; }
+    else if (scanAttempts[id] < SCAN_MAX_ATTEMPTS && !scanCancelled) { scanQueue.push(id); } // retry until both captured
+    else { scanCompleted++; } // gave up after max attempts
     updateScanBtn();
-    await scanOne(id);
   }
 }
 function scanOne(id) {
   return new Promise((resolve) => {
-    let finished = false, tabId = null;
+    let finished = false, tabId = null, result = { got7: false, got30: false };
     const finish = () => {
       if (finished) return; finished = true;
       clearTimeout(to);
       chrome.runtime.onMessage.removeListener(onMsg);
       if (tabId != null) { try { chrome.tabs.remove(tabId, () => void chrome.runtime.lastError); } catch (e) {} }
-      setTimeout(resolve, 250);
+      setTimeout(() => resolve(result), 200);
     };
-    const onMsg = (msg) => { if (msg && msg.type === "SS_SCAN_DONE" && msg.channelId === id) finish(); };
-    const to = setTimeout(finish, 24000); // hard cap if vidIQ never loads
+    const onMsg = (msg) => { if (msg && msg.type === "SS_SCAN_DONE" && msg.channelId === id) { result = { got7: !!msg.got7, got30: !!msg.got30 }; finish(); } };
+    const to = setTimeout(finish, 26000); // hard cap if vidIQ never loads
     chrome.runtime.onMessage.addListener(onMsg);
     try {
       chrome.tabs.create({ url: `https://www.youtube.com/channel/${id}#ssscan`, active: false }, (tab) => { tabId = tab && tab.id; });
@@ -777,6 +803,9 @@ function renderCard(c) {
   const hot = avg >= hotThreshold;
   const handle = c.customUrl ? esc(c.customUrl.startsWith("@") ? c.customUrl : "@" + c.customUrl) : "";
   const vq = (state.vidiqStats || {})[c.channelId] || {}; // real 7/30-day views from vidIQ
+  const mom = vqMomentum(c); // recent pace vs monthly pace (>1 heating up)
+  const momPill = mom == null ? "" :
+    `<span class="pill mom ${mom >= 1.15 ? "up" : mom <= 0.85 ? "down" : "flat"}" title="Recent 7-day pace vs the 30-day average. 🔥 = speeding up, ❄️ = cooling.">${mom >= 1.15 ? "🔥" : mom <= 0.85 ? "❄️" : "→"} ${mom >= 1 ? "+" : ""}${Math.round((mom - 1) * 100)}%</span>`;
 
   const nicheChipsHtml = (c.niches || []).length
     ? `<div class="card-niches">${(c.niches || []).map((n) => `<span class="nichechip" style="--nc:${nicheColor(n)}">${esc(n)}<b data-rmniche="${esc(n)}" title="Remove">×</b></span>`).join("")}</div>`
@@ -818,6 +847,7 @@ function renderCard(c) {
       <span class="pill">▶ <b>${compact(c.totalViews)}</b></span>
       <span class="pill">👤 <b>${compact(c.subscribers)}</b></span>
       <span class="pill">🎬 <b>${compact(c.videoCount)}</b></span>
+      ${momPill}
     </div>
 
     <div class="recentviews" title="Real views gained, read from vidIQ. Click ⟳ to scan this channel now, or it captures when you open the channel on YouTube.">
@@ -1928,6 +1958,47 @@ function runDeepAnalysis() {
   render(); tick(); next();
 }
 
+// "Hot right now" — insights built from the real vidIQ 7/30-day views.
+function vidiqInsights() {
+  const withV7 = state.watchlist.filter((c) => vq7(c) > 0);
+  if (!withV7.length) {
+    return `<div class="an-section-t first">🔥 Hot right now <span class="an-hint">real views from vidIQ</span></div>
+      <div class="rs-msg" style="text-align:left;padding:12px 0">Hit <b>Scan vidIQ</b> (top bar) to pull every channel's real last-7/30-day views — then this shows your hottest channels, what's heating up, and which niches are winning right now.</div>`;
+  }
+  const sign = (p) => (p >= 0 ? "+" : "");
+  // Hottest channels by last-7-day views
+  const topHot = withV7.slice().sort((a, b) => vq7(b) - vq7(a)).slice(0, 8);
+  const maxHot = vq7(topHot[0]) || 1;
+  const hotBars = topHot.map((c) => {
+    const m = vqMomentum(c);
+    const sub = `${compact(vq30(c))} in 30d${m != null ? ` · ${m >= 1 ? "🔥" : "❄️"} ${sign(Math.round((m - 1) * 100))}${Math.round((m - 1) * 100)}% pace` : ""}`;
+    return anBar(esc(c.title || "Channel"), vq7(c), maxHot, sub, "#ff7a5a");
+  }).join("");
+  // Heating up — biggest positive momentum (needs a meaningful 7-day base)
+  const floor = median(withV7.map(vq7).filter((v) => v > 0)) * 0.25;
+  const heating = withV7.filter((c) => vqMomentum(c) != null && vq7(c) >= floor)
+    .map((c) => ({ c, m: vqMomentum(c) })).sort((a, b) => b.m - a.m).slice(0, 6);
+  const heatRows = heating.map(({ c, m }) => {
+    const p = Math.round((m - 1) * 100);
+    return `<div class="an-hotrow"><span class="nm">${esc(c.title || "Channel")}</span><b class="mo ${p >= 0 ? "up" : "down"}">${p >= 0 ? "🔥 +" : "❄️ "}${p}%</b><span class="sb">${compact(vq7(c))}/7d</span></div>`;
+  }).join("");
+  // Hottest niches by total last-7-day views
+  const nicheHot = topLevelNiches().map((n) => {
+    const chs = uniqueChannelsInTree(n);
+    return { n, v7: chs.reduce((s, c) => s + vq7(c), 0), count: chs.filter((c) => vq7(c) > 0).length };
+  }).filter((x) => x.v7 > 0).sort((a, b) => b.v7 - a.v7);
+  const maxN = (nicheHot[0] && nicheHot[0].v7) || 1;
+  const nicheBars = nicheHot.slice(0, 10).map((x) => anBar(esc(x.n), x.v7, maxN, `${x.count} channel${x.count === 1 ? "" : "s"} scanned`, nicheColor(x.n))).join("");
+
+  return `
+    <div class="an-section-t first">🔥 Hottest channels <span class="an-hint">most views in the last 7 days (vidIQ)</span></div>
+    <div class="an-bars">${hotBars}</div>
+    ${heatRows ? `<div class="an-section-t">Heating up <span class="an-hint">7-day pace vs the 30-day average</span></div><div class="an-hotlist">${heatRows}</div>` : ""}
+    <div class="an-section-t">Hottest niches <span class="an-hint">total views last 7 days</span></div>
+    <div class="an-bars">${nicheBars}</div>
+    <div class="an-divider"></div>`;
+}
+
 function renderAnalytics() {
   const wrap = document.createElement("div");
   wrap.className = "analytics";
@@ -2037,6 +2108,7 @@ function renderAnalytics() {
   }
 
   wrap.innerHTML = `
+    ${vidiqInsights()}
     <div class="an-head"><div class="an-section-t first" style="margin:0">Overview</div>${tf}</div>
     ${cards}
     <div class="an-section-t">Niche opportunity map <span class="an-hint">top-left = fewer videos, higher avg views · bubble = total reach</span></div>
