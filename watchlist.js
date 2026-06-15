@@ -58,6 +58,7 @@ function load() {
     seedNichesFromChannels();
     syncControls();
     render();
+    setTimeout(preloadReps, 1200); // warm up hover-to-play for channels with no pick
   });
 }
 
@@ -545,7 +546,7 @@ function repPlay(p, id, anchor) {
       <span class="rp-thumb" style="background-image:url('https://i.ytimg.com/vi/${id}/hqdefault.jpg')"><span class="rp-play">▶</span></span>
       <span class="rp-cap">click to watch</span></a>`;
   } else {
-    p.innerHTML = `<iframe src="https://www.youtube-nocookie.com/embed/${id}?autoplay=1&mute=1&playsinline=1&rel=0&controls=1&loop=1&playlist=${id}" allow="autoplay; encrypted-media; picture-in-picture" allowfullscreen></iframe>`;
+    p.innerHTML = `<iframe src="https://www.youtube-nocookie.com/embed/${id}?autoplay=1&mute=0&playsinline=1&rel=0&controls=1&loop=1&playlist=${id}" allow="autoplay; encrypted-media; picture-in-picture" allowfullscreen></iframe>`;
   }
   positionRep(p, anchor);
   p.classList.add("show");
@@ -607,6 +608,39 @@ function setRep(c, videoId) {
   c.repVideoId = c.repVideoId === videoId ? "" : videoId;
   save();
   toast(c.repVideoId ? "Set as the channel's short" : "Cleared representative short");
+}
+
+// One-time-per-session: grab a representative short for every channel that has
+// none yet, so hover-to-play is instant afterwards. Throttled; best-effort.
+let repsPreloaded = false;
+function preloadReps() {
+  if (repsPreloaded) return;
+  repsPreloaded = true;
+  const todo = state.watchlist.filter((c) => c.channelId && !c.repVideoId);
+  if (!todo.length) return;
+  const total = todo.length;
+  let done = 0, loaded = 0, noKey = false, announced = false;
+  const queue = todo.slice();
+  const fetchOne = (c) => new Promise((resolve) => {
+    chrome.runtime.sendMessage({ type: "RECENT", channelId: c.channelId, maxItems: 30 }, (res) => {
+      if (chrome.runtime.lastError) return resolve();
+      if (res && !res.ok && res.error === "NO_API_KEY") { noKey = true; return resolve(); }
+      if (res && res.ok) {
+        const id = repBestShort(res.recent);
+        if (id) { c.repVideoId = id; loaded++; }
+      }
+      done++;
+      if (!announced) { announced = true; toast(`Loading channel previews… (${total})`); }
+      resolve();
+    });
+  });
+  const worker = async () => {
+    while (queue.length && !noKey) await fetchOne(queue.shift());
+  };
+  Promise.all([worker(), worker(), worker(), worker()]).then(() => {
+    if (noKey && !loaded) { toast("Set your YouTube API key (🔑) to preload previews"); return; }
+    if (loaded) { save(); toast(`Previews ready ✓ (${loaded} channels)`); }
+  });
 }
 
 function avatarHtml(c, cls = "") {
