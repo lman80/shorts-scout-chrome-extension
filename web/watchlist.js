@@ -88,8 +88,13 @@ function normalize(c) {
     recentStatsAt: c.recentStatsAt || 0, // when v7/v30 were last computed
     notes: c.notes || "",
     examples: c.examples || [],
+    inProduction: !!c.inProduction, // showing on the In Production board
+    prodStatus: c.prodStatus || "", // production stage
+    prodNotes: c.prodNotes || "", // the big production notes
+    prodSteps: Array.isArray(c.prodSteps) ? c.prodSteps : [], // [{text, done}]
   };
 }
+const PROD_STAGES = ["Idea", "Researching", "Scripting", "Filming", "Editing", "Scheduled", "Published"];
 
 // Move any language values that were saved as tags over to the Language dimension.
 function migrateLanguages() {
@@ -296,6 +301,7 @@ function render() {
   }
 
   content.innerHTML = "";
+  if (state.view === "prod") return content.appendChild(renderProduction());
   if (state.view === "top") {
     content.appendChild(renderTopCandidates());
     const tb = content.querySelector(".tc-board");
@@ -851,6 +857,7 @@ function renderCard(c) {
     .join("");
 
   card.innerHTML = `
+    ${c.inProduction ? `<div class="card-prodflag">🎬 IN PRODUCTION</div>` : ""}
     ${c.topCandidate ? `<div class="card-topflag">★ TOP CANDIDATE</div>` : ""}
     ${nicheChipsHtml}
     ${tagChips}
@@ -860,6 +867,7 @@ function renderCard(c) {
         <a class="card-name" href="${channelUrl(c)}" target="_blank" rel="noopener">${esc(c.title) || "Channel"}</a>
         <div class="card-handle">${handle || "&nbsp;"}</div>
       </div>
+      <button class="card-prod ${c.inProduction ? "on" : ""}" title="${c.inProduction ? "In production" : "Start production"}">🎬</button>
       <button class="card-star ${c.topCandidate ? "on" : ""}" title="${c.topCandidate ? "Top candidate" : "Mark as top candidate"}">${c.topCandidate ? "★" : "☆"}</button>
       <button class="card-x" title="Remove">✕</button>
     </div>
@@ -1154,6 +1162,12 @@ function wireCard(card, c) {
   card.addEventListener("dragend", () => card.classList.remove("dragging"));
 
   card.querySelector(".card-x").onclick = () => removeChannel(c.channelId);
+  card.querySelector(".card-prod").onclick = () => {
+    c.inProduction = !c.inProduction;
+    if (c.inProduction && !c.prodStatus) c.prodStatus = "Idea";
+    save(); render();
+    toast(c.inProduction ? "Added to In Production 🎬" : "Removed from production");
+  };
   card.querySelector(".card-star").onclick = () => {
     c.topCandidate = !c.topCandidate;
     const wantNote = c.topCandidate && !(c.notes && c.notes.trim());
@@ -2274,6 +2288,88 @@ function moveNicheOrder(dragged, target) {
   const f = ni.indexOf(dragged); if (f < 0) return; ni.splice(f, 1);
   let t = ni.indexOf(target); if (t < 0) t = ni.length; ni.splice(t, 0, dragged);
   state.niches = ni; save(); render();
+}
+
+// ---- In Production: a workspace per channel you're actively building ---------
+function renderProduction() {
+  const wrap = document.createElement("div");
+  wrap.className = "production";
+  let list = state.watchlist.filter((c) => c.inProduction);
+  const q = (state.search || "").toLowerCase();
+  if (q) list = list.filter((c) => (c.title || "").toLowerCase().includes(q));
+  if (!list.length) {
+    wrap.innerHTML = `<div class="empty"><div><div class="big">🎬</div><h2>Nothing in production yet</h2><p>On any channel card, tap the <b>🎬</b> button to start building content modeled on it. It lands here with a stage tracker, a steps checklist, and a big notes pad.</p></div></div>`;
+    return wrap;
+  }
+  const head = document.createElement("div");
+  head.className = "tc-head";
+  head.innerHTML = `🎬 In Production <span>${list.length} channel${list.length === 1 ? "" : "s"} you're building</span>`;
+  wrap.appendChild(head);
+  list.forEach((c) => wrap.appendChild(renderProdCard(c)));
+  return wrap;
+}
+
+function renderProdCard(c) {
+  const el = document.createElement("div");
+  el.className = "prod-card";
+  const mom = vqMomentum(c);
+  const stageOpts = PROD_STAGES.map((s) => `<option value="${esc(s)}"${c.prodStatus === s ? " selected" : ""}>${esc(s)}</option>`).join("");
+  const niches = (c.niches || []).map((n) => `<span class="chip niche" style="background:${nicheColor(n)}">${esc(n)}</span>`).join("");
+  el.innerHTML = `
+    <div class="prod-top${c.repVideoId ? " has-rep" : ""}">
+      ${avatarHtml(c, "prod-av")}
+      <div class="prod-id">
+        <a class="prod-name" href="${channelUrl(c)}" target="_blank" rel="noopener">${esc(c.title) || "Channel"}</a>
+        ${niches ? `<div class="prod-niches">${niches}</div>` : ""}
+      </div>
+      <select class="prod-stage" title="Production stage">${stageOpts}</select>
+      <button class="prod-remove" title="Remove from production">✕</button>
+    </div>
+    <div class="prod-refstats">
+      <span>👁 7d <b>${vq7(c) ? compact(vq7(c)) : "—"}</b></span>
+      <span>30d <b>${vq30(c) ? compact(vq30(c)) : "—"}</b></span>
+      ${mom != null ? `<span class="mom ${mom >= 1.1 ? "up" : mom <= 0.9 ? "down" : ""}">${mom >= 1.1 ? "🔥" : mom <= 0.9 ? "❄️" : "→"} ${mom >= 1 ? "+" : ""}${Math.round((mom - 1) * 100)}%</span>` : ""}
+      <span>avg/vid <b>${compact(avgPerVideo(c))}</b></span>
+      <span>👤 <b>${compact(c.subscribers)}</b></span>
+      <button class="prod-review">▶ Review their shorts</button>
+    </div>
+    <div class="prod-body">
+      <div class="prod-col">
+        <div class="prod-h">✅ Production steps</div>
+        <div class="prod-steplist"></div>
+        <div class="prod-addrow"><input class="prod-addinput" type="text" placeholder="Add a step (e.g. write 3 hooks)…"><button class="prod-addbtn">＋ Add</button></div>
+      </div>
+      <div class="prod-col notes">
+        <div class="prod-h">📝 Notes</div>
+        <textarea class="prod-notesarea" placeholder="Everything you're doing on this one — script ideas, the hook, format breakdown, what's working, what to test next…">${esc(c.prodNotes || "")}</textarea>
+      </div>
+    </div>`;
+  el.querySelector(".prod-stage").onchange = (e) => { c.prodStatus = e.target.value; save(); };
+  el.querySelector(".prod-remove").onclick = () => { c.inProduction = false; save(); render(); };
+  el.querySelector(".prod-review").onclick = () => openReview(c.channelId);
+  el.querySelector(".prod-notesarea").onchange = (e) => { c.prodNotes = e.target.value; save(); };
+  if (c.repVideoId) {
+    const top = el.querySelector(".prod-top");
+    top.addEventListener("mouseenter", () => showRepPreview(c, top));
+    top.addEventListener("mouseleave", hideRepPreview);
+  }
+  const steplist = el.querySelector(".prod-steplist");
+  function drawSteps() {
+    if (!Array.isArray(c.prodSteps)) c.prodSteps = [];
+    const done = c.prodSteps.filter((s) => s.done).length;
+    steplist.innerHTML = (c.prodSteps.length
+      ? c.prodSteps.map((s, i) => `<label class="prod-step${s.done ? " done" : ""}"><input type="checkbox" data-i="${i}"${s.done ? " checked" : ""}><span>${esc(s.text)}</span><button class="prod-stepdel" data-i="${i}" title="Delete">✕</button></label>`).join("")
+      : `<div class="prod-empty">No steps yet — add the first below.</div>`)
+      + (c.prodSteps.length ? `<div class="prod-progress">${done}/${c.prodSteps.length} done</div>` : "");
+    steplist.querySelectorAll('input[type="checkbox"]').forEach((cb) => cb.onchange = () => { c.prodSteps[+cb.dataset.i].done = cb.checked; save(); drawSteps(); });
+    steplist.querySelectorAll(".prod-stepdel").forEach((b) => b.onclick = () => { c.prodSteps.splice(+b.dataset.i, 1); save(); drawSteps(); });
+  }
+  drawSteps();
+  const addInput = el.querySelector(".prod-addinput");
+  const addStep = () => { const t = addInput.value.trim(); if (!t) return; c.prodSteps.push({ text: t, done: false }); addInput.value = ""; save(); drawSteps(); addInput.focus(); };
+  el.querySelector(".prod-addbtn").onclick = addStep;
+  addInput.onkeydown = (e) => { if (e.key === "Enter") { e.preventDefault(); addStep(); } };
+  return el;
 }
 
 function renderVideos() {

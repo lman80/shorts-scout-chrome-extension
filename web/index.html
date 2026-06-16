@@ -718,6 +718,52 @@
       .tc-rankrow.tc-over { box-shadow: 0 -3px 0 var(--accent, #6e8efb); }
       .tc-rank { font-weight: 800; color: #e0a23a; font-size: 15px; margin: 0 0 5px 3px; cursor: grab; }
       .tc-rankrow .card { width: 100%; margin-bottom: 0; cursor: grab; }
+
+      /* production toggle + badge on cards */
+      .card-prodflag { background: linear-gradient(90deg,#7c3aed,#db2777); color: #fff; font-size: 10px; font-weight: 800; letter-spacing: 0.06em; padding: 4px 10px; border-radius: 8px; display: inline-block; margin-bottom: 8px; }
+      .card-prod { background: none; border: 0; color: #6a6a78; cursor: pointer; font-size: 15px; padding: 0 2px; }
+      .card-prod.on, .card-prod:hover { color: #c084fc; }
+
+      /* In Production workspace */
+      .production { max-width: 1040px; margin: 0 auto; padding: 18px 20px 70px; }
+      .prod-card { background: var(--surface); border: 1px solid var(--line); border-radius: 18px; padding: 18px; margin-bottom: 16px; box-shadow: var(--shadow); }
+      .prod-top { display: flex; align-items: center; gap: 12px; }
+      .prod-top.has-rep { cursor: pointer; }
+      .prod-top .avatar { width: 48px; height: 48px; border-radius: 50%; flex: none; }
+      .prod-id { flex: 1; min-width: 0; }
+      .prod-name { font-size: 18px; font-weight: 800; color: var(--text); text-decoration: none; }
+      .prod-name:hover { text-decoration: underline; }
+      .prod-niches { display: flex; flex-wrap: wrap; gap: 5px; margin-top: 5px; }
+      .prod-niches .chip { color: #fff; border-radius: 999px; padding: 2px 9px; font-size: 11px; font-weight: 700; }
+      .prod-stage { background: var(--surface3); color: var(--text); border: 1px solid var(--line2); border-radius: 9px; padding: 7px 10px; font-size: 13px; font-weight: 600; }
+      .prod-remove { background: none; border: 0; color: var(--muted); cursor: pointer; font-size: 15px; }
+      .prod-remove:hover { color: var(--red); }
+      .prod-refstats { display: flex; flex-wrap: wrap; align-items: center; gap: 8px 16px; margin: 14px 0; font-size: 13px; color: var(--dim); }
+      .prod-refstats b { color: var(--text); font-weight: 800; }
+      .prod-refstats .mom.up { color: #ff7a5a; } .prod-refstats .mom.down { color: #7ab0ff; }
+      .prod-review { margin-left: auto; background: var(--surface3); border: 1px solid var(--line2); color: var(--dim); border-radius: 9px; padding: 7px 13px; font-size: 12.5px; font-weight: 600; cursor: pointer; }
+      .prod-review:hover { color: var(--text); }
+      .prod-body { display: grid; grid-template-columns: 1fr 1.25fr; gap: 16px; }
+      .prod-col { background: var(--surface2); border: 1px solid var(--line2); border-radius: 14px; padding: 14px; }
+      .prod-col.notes { display: flex; flex-direction: column; }
+      .prod-h { font-size: 12px; font-weight: 800; text-transform: uppercase; letter-spacing: 0.05em; color: var(--dim); margin-bottom: 11px; }
+      .prod-steplist { display: flex; flex-direction: column; gap: 4px; margin-bottom: 11px; }
+      .prod-step { display: flex; align-items: center; gap: 9px; font-size: 13.5px; color: var(--text); padding: 5px 2px; border-radius: 7px; }
+      .prod-step:hover { background: var(--surface3); }
+      .prod-step input { width: 17px; height: 17px; accent-color: #46d17f; flex: none; cursor: pointer; }
+      .prod-step span { flex: 1; }
+      .prod-step.done span { text-decoration: line-through; color: var(--muted); }
+      .prod-stepdel { background: none; border: 0; color: var(--muted); cursor: pointer; opacity: 0; font-size: 12px; }
+      .prod-step:hover .prod-stepdel { opacity: 1; }
+      .prod-stepdel:hover { color: var(--red); }
+      .prod-progress { font-size: 11px; color: var(--muted); margin-top: 6px; padding-left: 2px; }
+      .prod-empty { color: var(--muted); font-size: 12.5px; padding: 4px 2px; }
+      .prod-addrow { display: flex; gap: 7px; }
+      .prod-addinput { flex: 1; background: var(--bg); border: 1px solid var(--line2); color: var(--text); border-radius: 9px; padding: 8px 11px; font-size: 13px; }
+      .prod-addbtn { background: var(--surface3); border: 1px solid var(--line2); color: var(--dim); border-radius: 9px; padding: 8px 12px; font-size: 12.5px; font-weight: 700; cursor: pointer; white-space: nowrap; }
+      .prod-addbtn:hover { color: var(--text); }
+      .prod-notesarea { flex: 1; min-height: 210px; width: 100%; background: var(--bg); border: 1px solid var(--line2); color: var(--text); border-radius: 11px; padding: 12px 14px; font-family: inherit; font-size: 13.5px; line-height: 1.5; resize: vertical; box-sizing: border-box; }
+      @media (max-width: 760px) { .prod-body { grid-template-columns: 1fr; } }
     </style>
   
     <script src="https://www.gstatic.com/firebasejs/10.12.2/firebase-app-compat.js"></script>
@@ -785,6 +831,7 @@
       <div class="seg" id="viewseg">
         <button data-view="board" class="on">Board</button>
         <button data-view="top">★ Top</button>
+        <button data-view="prod">🎬 Production</button>
         <button data-view="table">Table</button>
         <button data-view="analytics">Analytics</button>
         <button data-view="videos">Videos</button>
