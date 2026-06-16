@@ -23,7 +23,7 @@ const ATTR_DIMS = [
 // Stable color per niche (by index) for the column dot.
 const NICHE_COLORS = ["#ff0033", "#4aa8ff", "#ffcb47", "#4ade80", "#c084fc", "#ff8a3d", "#2dd4bf", "#f472b6", "#a3e635", "#60a5fa"];
 
-const state = { watchlist: [], niches: [], nicheParents: {}, tags: [], madeBy: [], madeFor: [], languages: [], savedVideos: [], snapshots: [], vidiqStats: {}, vidiqHistory: {}, sort: "avg", view: "board", search: "", filterTop: false };
+const state = { watchlist: [], niches: [], nicheParents: {}, tags: [], madeBy: [], madeFor: [], languages: [], savedVideos: [], snapshots: [], vidiqStats: {}, vidiqHistory: {}, topOrder: [], sort: "avg", view: "board", search: "", filterTop: false };
 const collapsedSub = new Set(); // collapsed "parent>child" sub-niche sections on the board
 let ignoreNextChange = false;
 const recentCache = {}; // channelId -> { loading } | { recent:[...] } | { error }
@@ -38,10 +38,11 @@ function load() {
   // Ask the background worker to pull the latest from the cloud right away
   // (the periodic alarm also does this every minute). Best-effort.
   try { chrome.runtime.sendMessage({ type: "CLOUD_SYNC" }, () => void chrome.runtime.lastError); } catch (e) {}
-  chrome.storage.local.get(["watchlist", "niches", "nicheParents", "boardPrefs", "savedVideos", "snapshots", "tags", "madeBy", "madeFor", "languages", "vidiqStats", "vidiqHistory"], (d) => {
+  chrome.storage.local.get(["watchlist", "niches", "nicheParents", "boardPrefs", "savedVideos", "snapshots", "tags", "madeBy", "madeFor", "languages", "vidiqStats", "vidiqHistory", "topOrder"], (d) => {
     state.watchlist = (d.watchlist || []).map(normalize);
     state.vidiqStats = d.vidiqStats || {};
     state.vidiqHistory = d.vidiqHistory || {};
+    state.topOrder = d.topOrder || [];
     state.niches = d.niches || [];
     state.nicheParents = d.nicheParents || {};
     state.tags = d.tags && d.tags.length ? d.tags : DEFAULT_TAGS.slice();
@@ -130,6 +131,7 @@ function save() {
     madeBy: state.madeBy,
     madeFor: state.madeFor,
     languages: state.languages,
+    topOrder: state.topOrder,
     boardPrefs: { sort: state.sort, view: state.view },
   });
 }
@@ -153,6 +155,7 @@ chrome.storage.onChanged.addListener((changes, area) => {
   if (changes.snapshots) state.snapshots = changes.snapshots.newValue || [];
   if (changes.vidiqStats) state.vidiqStats = changes.vidiqStats.newValue || {};
   if (changes.vidiqHistory) state.vidiqHistory = changes.vidiqHistory.newValue || {};
+  if (changes.topOrder) state.topOrder = changes.topOrder.newValue || [];
   seedNichesFromChannels();
   render();
 });
@@ -2145,27 +2148,99 @@ function saveVideos() {
   chrome.storage.local.set({ savedVideos: state.savedVideos });
 }
 
-// ---- Top Candidates: your ★ channels, ranked by recent views, with notes ----
-function renderTopCandidates() {
-  const wrap = document.createElement("div");
-  wrap.className = "topcands";
+// ---- Top Candidates: rankable niche board (drag niches + drag channels) -----
+let tcDrag = null; // { kind: "row"|"col", cid, niche }
+function topCandidatesList() {
   const q = (state.search || "").toLowerCase();
   let cands = state.watchlist.filter((c) => c.topCandidate);
   if (q) cands = cands.filter((c) => (c.title || "").toLowerCase().includes(q) || (c.niches || []).join(" ").toLowerCase().includes(q) || (c.tags || []).join(" ").toLowerCase().includes(q));
-  cands.sort((a, b) => (vq7(b) || 0) - (vq7(a) || 0) || (b.totalViews || 0) - (a.totalViews || 0));
+  return cands;
+}
+function topRankIndex(c) { const i = (state.topOrder || []).indexOf(c.channelId); return i < 0 ? 1e9 : i; }
+function topRankSort(a, b) { return (topRankIndex(a) - topRankIndex(b)) || (vq7(b) || 0) - (vq7(a) || 0) || (b.totalViews || 0) - (a.totalViews || 0); }
+
+function renderTopCandidates() {
+  const wrap = document.createElement("div");
+  wrap.className = "topcands";
+  const cands = topCandidatesList();
   if (!cands.length) {
-    wrap.innerHTML = `<div class="empty"><div><div class="big">★</div><h2>No top candidates yet</h2><p>Mark a channel a top candidate with its ★ (on the card, the Review drawer, or the in-YouTube save sheet). Your best-of-the-best show up here, ranked by views in the last 7 days, with a notes box for each.</p></div></div>`;
+    wrap.innerHTML = `<div class="empty"><div><div class="big">★</div><h2>No top candidates yet</h2><p>Mark a channel a top candidate with its ★. They appear here in niche columns — drag the columns to rank niches, and drag channels within a column to rank them #1, #2, #3.</p></div></div>`;
     return wrap;
   }
   const head = document.createElement("div");
   head.className = "tc-head";
-  head.innerHTML = `★ Top Candidates <span>${cands.length} · ranked by views in the last 7 days</span>`;
+  head.innerHTML = `★ Top Candidates <span>${cands.length} · drag niches and channels to rank them</span>`;
   wrap.appendChild(head);
-  const grid = document.createElement("div");
-  grid.className = "tc-grid";
-  cands.forEach((c) => grid.appendChild(renderCard(c))); // same card as the board
-  wrap.appendChild(grid);
+  const board = document.createElement("div");
+  board.className = "tc-board";
+  topLevelNiches().forEach((n) => {
+    const inN = cands.filter((c) => uniqueChannelsInTree(n).includes(c));
+    if (inN.length) board.appendChild(renderTopColumn(n, inN));
+  });
+  const noNiche = cands.filter((c) => !(c.niches || []).some((n) => state.niches.includes(n)));
+  if (noNiche.length) board.appendChild(renderTopColumn(UNSORTED, noNiche));
+  wrap.appendChild(board);
   return wrap;
+}
+
+function renderTopColumn(niche, list) {
+  const col = document.createElement("div");
+  col.className = "tc-col" + (niche === UNSORTED ? " unsorted" : "");
+  col.dataset.niche = niche;
+  col.draggable = niche !== UNSORTED;
+  const name = niche === UNSORTED ? "Unsorted" : niche;
+  const head = document.createElement("div");
+  head.className = "tc-colhead";
+  head.innerHTML = `<span class="tc-coldot" style="background:${niche === UNSORTED ? "#3a3a44" : nicheColor(niche)}"></span><span class="tc-coltitle">${esc(name)}</span><span class="tc-colcount">${list.length}</span>${niche !== UNSORTED ? `<span class="tc-coldrag" title="Drag to rank this niche">⠿</span>` : ""}`;
+  col.appendChild(head);
+  list.slice().sort(topRankSort).forEach((c, i) => {
+    const row = document.createElement("div");
+    row.className = "tc-rankrow";
+    row.dataset.cid = c.channelId;
+    row.draggable = true;
+    const badge = document.createElement("div");
+    badge.className = "tc-rank";
+    badge.textContent = "#" + (i + 1);
+    row.appendChild(badge);
+    const card = renderCard(c);
+    card.draggable = false; // the row is the drag handle (so the card's own niche-drag is off here)
+    row.appendChild(card);
+    wireTopRow(row, c, niche);
+    col.appendChild(row);
+  });
+  wireTopCol(col, niche);
+  return col;
+}
+
+function wireTopRow(row, c, niche) {
+  row.addEventListener("dragstart", (e) => { e.stopPropagation(); tcDrag = { kind: "row", cid: c.channelId, niche }; row.classList.add("tc-dragging"); try { e.dataTransfer.effectAllowed = "move"; e.dataTransfer.setData("text/plain", "r"); } catch (x) {} });
+  row.addEventListener("dragend", (e) => { e.stopPropagation(); row.classList.remove("tc-dragging"); tcDrag = null; });
+  row.addEventListener("dragover", (e) => { if (tcDrag && tcDrag.kind === "row") { e.preventDefault(); e.stopPropagation(); row.classList.add("tc-over"); } });
+  row.addEventListener("dragleave", () => row.classList.remove("tc-over"));
+  row.addEventListener("drop", (e) => { if (tcDrag && tcDrag.kind === "row") { e.preventDefault(); e.stopPropagation(); row.classList.remove("tc-over"); moveTopRank(tcDrag.cid, c.channelId, niche); } });
+}
+function wireTopCol(col, niche) {
+  col.addEventListener("dragstart", (e) => { if (tcDrag && tcDrag.kind === "row") return; tcDrag = { kind: "col", niche }; col.classList.add("tc-coldragging"); try { e.dataTransfer.effectAllowed = "move"; e.dataTransfer.setData("text/plain", "c"); } catch (x) {} });
+  col.addEventListener("dragend", () => { col.classList.remove("tc-coldragging"); tcDrag = null; });
+  col.addEventListener("dragover", (e) => { if (tcDrag && tcDrag.kind === "col") { e.preventDefault(); col.classList.add("tc-colover"); } });
+  col.addEventListener("dragleave", () => col.classList.remove("tc-colover"));
+  col.addEventListener("drop", (e) => { if (tcDrag && tcDrag.kind === "col" && niche !== UNSORTED && tcDrag.niche !== niche) { e.preventDefault(); col.classList.remove("tc-colover"); moveNicheOrder(tcDrag.niche, niche); } });
+}
+function moveTopRank(draggedCid, targetCid, niche) {
+  if (draggedCid === targetCid) return;
+  const dragged = state.watchlist.find((c) => c.channelId === draggedCid);
+  if (dragged && niche !== UNSORTED && !(dragged.niches || []).includes(niche)) dragged.niches = [...(dragged.niches || []), niche];
+  const all = topCandidatesList().slice().sort(topRankSort).map((c) => c.channelId);
+  const from = all.indexOf(draggedCid); if (from >= 0) all.splice(from, 1);
+  let to = all.indexOf(targetCid); if (to < 0) to = all.length; all.splice(to, 0, draggedCid);
+  state.topOrder = all;
+  save(); render();
+}
+function moveNicheOrder(dragged, target) {
+  const ni = state.niches.slice();
+  const f = ni.indexOf(dragged); if (f < 0) return; ni.splice(f, 1);
+  let t = ni.indexOf(target); if (t < 0) t = ni.length; ni.splice(t, 0, dragged);
+  state.niches = ni; save(); render();
 }
 
 function renderVideos() {
