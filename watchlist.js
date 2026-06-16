@@ -2290,6 +2290,32 @@ function moveNicheOrder(dragged, target) {
   state.niches = ni; save(); render();
 }
 
+// ---- nested production steps (sub-steps to any depth) -----------------------
+function psLocate(steps, pathStr) {
+  const idx = pathStr.split("-").map(Number);
+  let arr = steps;
+  for (let k = 0; k < idx.length - 1; k++) { const n = arr[idx[k]]; if (!n) return null; if (!Array.isArray(n.children)) n.children = []; arr = n.children; }
+  const i = idx[idx.length - 1];
+  return { arr, i, node: arr[i] };
+}
+function psSetDone(node, val) { node.done = val; (node.children || []).forEach((c) => psSetDone(c, val)); }
+function psCounts(steps) { let done = 0, total = 0; const walk = (arr) => arr.forEach((n) => { const kids = n.children || []; if (kids.length) walk(kids); else { total++; if (n.done) done++; } }); walk(steps); return { done, total }; }
+function psState(node) {
+  const kids = node.children || [];
+  if (!kids.length) return node.done ? "checked" : "unchecked";
+  const { done, total } = psCounts([node]);
+  return done === 0 ? "unchecked" : done === total ? "checked" : "indeterminate";
+}
+function psTreeHtml(steps, prefix) {
+  return `<ul class="ps-list">` + steps.map((n, i) => {
+    const path = prefix === "" ? "" + i : prefix + "-" + i;
+    const kids = Array.isArray(n.children) ? n.children : [];
+    const st = psState(n);
+    const caret = kids.length ? `<button class="ps-caret${n.collapsed ? "" : " open"}" data-path="${path}">▸</button>` : `<span class="ps-caretspace"></span>`;
+    return `<li class="ps-item"><div class="ps-row ${st}">${caret}<button class="ps-check ${st}" data-path="${path}"></button><span class="ps-text" data-path="${path}">${esc(n.text || "")}</span><span class="ps-actions"><button class="ps-add" data-path="${path}" title="Add sub-step">＋</button><button class="ps-del" data-path="${path}" title="Delete">✕</button></span></div>${kids.length && !n.collapsed ? psTreeHtml(kids, path) : ""}</li>`;
+  }).join("") + `</ul>`;
+}
+
 // ---- In Production: a workspace per channel you're actively building ---------
 function renderProduction() {
   const wrap = document.createElement("div");
@@ -2354,19 +2380,42 @@ function renderProdCard(c) {
     top.addEventListener("mouseleave", hideRepPreview);
   }
   const steplist = el.querySelector(".prod-steplist");
-  function drawSteps() {
+  const redraw = () => {
     if (!Array.isArray(c.prodSteps)) c.prodSteps = [];
-    const done = c.prodSteps.filter((s) => s.done).length;
-    steplist.innerHTML = (c.prodSteps.length
-      ? c.prodSteps.map((s, i) => `<label class="prod-step${s.done ? " done" : ""}"><input type="checkbox" data-i="${i}"${s.done ? " checked" : ""}><span>${esc(s.text)}</span><button class="prod-stepdel" data-i="${i}" title="Delete">✕</button></label>`).join("")
-      : `<div class="prod-empty">No steps yet — add the first below.</div>`)
-      + (c.prodSteps.length ? `<div class="prod-progress">${done}/${c.prodSteps.length} done</div>` : "");
-    steplist.querySelectorAll('input[type="checkbox"]').forEach((cb) => cb.onchange = () => { c.prodSteps[+cb.dataset.i].done = cb.checked; save(); drawSteps(); });
-    steplist.querySelectorAll(".prod-stepdel").forEach((b) => b.onclick = () => { c.prodSteps.splice(+b.dataset.i, 1); save(); drawSteps(); });
+    const { done, total } = psCounts(c.prodSteps);
+    const pct = total ? Math.round((done / total) * 100) : 0;
+    steplist.innerHTML = (c.prodSteps.length ? psTreeHtml(c.prodSteps, "") : `<div class="prod-empty">No steps yet — add your first below.</div>`)
+      + (total ? `<div class="prod-progress"><div class="prod-bar"><div class="prod-barfill" style="width:${pct}%"></div></div><span>${done}/${total}</span></div>` : "");
+  };
+  function startEdit(span) {
+    span.contentEditable = "true"; span.classList.add("editing"); span.focus();
+    try { const r = document.createRange(); r.selectNodeContents(span); const s = getSelection(); s.removeAllRanges(); s.addRange(r); } catch (e) {}
+    const finish = () => {
+      span.removeEventListener("blur", finish);
+      span.contentEditable = "false"; span.classList.remove("editing");
+      const L = psLocate(c.prodSteps, span.dataset.path);
+      if (L && L.node) {
+        L.node.text = (span.textContent || "").trim();
+        if (!L.node.text && !(L.node.children || []).length) L.arr.splice(L.i, 1); // drop empty leaf
+        save();
+      }
+      redraw();
+    };
+    span.addEventListener("blur", finish);
+    span.addEventListener("keydown", (ev) => { if (ev.key === "Enter") { ev.preventDefault(); span.blur(); } });
   }
-  drawSteps();
+  const focusEdit = (path) => { const s = steplist.querySelector('.ps-text[data-path="' + path + '"]'); if (s) startEdit(s); };
+  steplist.addEventListener("click", (e) => {
+    const t = e.target;
+    if (t.classList.contains("ps-caret")) { const L = psLocate(c.prodSteps, t.dataset.path); if (L && L.node) { L.node.collapsed = !L.node.collapsed; save(); redraw(); } return; }
+    if (t.classList.contains("ps-check")) { const L = psLocate(c.prodSteps, t.dataset.path); if (L && L.node) { psSetDone(L.node, psState(L.node) !== "checked"); save(); redraw(); } return; }
+    if (t.classList.contains("ps-add")) { const L = psLocate(c.prodSteps, t.dataset.path); if (L && L.node) { if (!Array.isArray(L.node.children)) L.node.children = []; L.node.children.push({ text: "", done: false, children: [] }); L.node.collapsed = false; save(); redraw(); focusEdit(t.dataset.path + "-" + (L.node.children.length - 1)); } return; }
+    if (t.classList.contains("ps-del")) { const L = psLocate(c.prodSteps, t.dataset.path); if (L) { L.arr.splice(L.i, 1); save(); redraw(); } return; }
+    if (t.classList.contains("ps-text")) { startEdit(t); return; }
+  });
+  redraw();
   const addInput = el.querySelector(".prod-addinput");
-  const addStep = () => { const t = addInput.value.trim(); if (!t) return; c.prodSteps.push({ text: t, done: false }); addInput.value = ""; save(); drawSteps(); addInput.focus(); };
+  const addStep = () => { const t = addInput.value.trim(); if (!t) return; c.prodSteps.push({ text: t, done: false, children: [] }); addInput.value = ""; save(); redraw(); addInput.focus(); };
   el.querySelector(".prod-addbtn").onclick = addStep;
   addInput.onkeydown = (e) => { if (e.key === "Enter") { e.preventDefault(); addStep(); } };
   return el;
