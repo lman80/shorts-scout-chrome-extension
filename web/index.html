@@ -780,6 +780,40 @@
       .prod-addbtn:hover { color: var(--text); }
       .prod-notesarea { flex: 1; min-height: 210px; width: 100%; background: var(--bg); border: 1px solid var(--line2); color: var(--text); border-radius: 11px; padding: 12px 14px; font-family: inherit; font-size: 13.5px; line-height: 1.5; resize: vertical; box-sizing: border-box; }
       @media (max-width: 760px) { .prod-body { grid-template-columns: 1fr; } }
+
+      /* ---- Media to adapt (long-form → shorts) ---- */
+      .media { padding: 22px 24px 60px; max-width: 1400px; margin: 0 auto; }
+      .media-head-row { margin-bottom: 18px; }
+      .media-title-h { font-size: 22px; font-weight: 800; letter-spacing: -0.01em; }
+      .media-sub { color: var(--muted); font-size: 13px; margin-top: 4px; max-width: 620px; }
+      .media-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(320px, 1fr)); gap: 16px; align-items: start; }
+      .media-card { background: var(--surface); border: 1px solid var(--line2); border-radius: 16px; padding: 15px; box-shadow: var(--shadow); }
+      .media-card-head { display: flex; align-items: center; gap: 8px; margin-bottom: 12px; }
+      .media-cardtitle { flex: 1; min-width: 0; background: transparent; border: 0; color: var(--text); font-size: 17px; font-weight: 800; padding: 4px 2px; border-bottom: 1px solid transparent; }
+      .media-cardtitle:hover, .media-cardtitle:focus { border-bottom-color: var(--line2); outline: none; }
+      .media-del { background: none; border: 0; color: var(--muted); cursor: pointer; font-size: 14px; padding: 4px 6px; border-radius: 7px; flex: none; }
+      .media-del:hover { color: var(--red); background: var(--surface3); }
+      .media-vids { display: grid; grid-template-columns: repeat(auto-fill, minmax(96px, 1fr)); gap: 8px; margin-bottom: 12px; }
+      .media-vid { position: relative; display: block; aspect-ratio: 16/9; border-radius: 10px; overflow: hidden; background: var(--surface3); border: 1px solid var(--line); text-decoration: none; }
+      .media-vid:hover { border-color: var(--accent, #4f8cff); }
+      .media-thumb { display: block; width: 100%; height: 100%; background-size: cover; background-position: center; }
+      .media-thumb.noimg { display: grid; place-items: center; color: var(--dim); font-size: 18px; }
+      .media-play { position: absolute; inset: 0; display: grid; place-items: center; color: #fff; font-size: 17px; text-shadow: 0 1px 6px rgba(0,0,0,0.7); opacity: 0; transition: opacity 0.12s; pointer-events: none; }
+      .media-vid:hover .media-play { opacity: 1; }
+      .media-vdel { position: absolute; top: 3px; right: 3px; width: 19px; height: 19px; border-radius: 50%; border: 0; background: rgba(0,0,0,0.65); color: #fff; font-size: 11px; line-height: 1; cursor: pointer; opacity: 0; transition: opacity 0.12s; display: grid; place-items: center; }
+      .media-vid:hover .media-vdel { opacity: 1; }
+      .media-vdel:hover { background: var(--red); }
+      .media-empty { grid-column: 1 / -1; color: var(--muted); font-size: 12.5px; padding: 10px 2px; }
+      .media-addrow { display: flex; gap: 7px; margin-bottom: 11px; }
+      .media-addvid { flex: 1; min-width: 0; background: var(--bg); border: 1px solid var(--line2); color: var(--text); border-radius: 9px; padding: 8px 11px; font-size: 13px; }
+      .media-addbtn { background: var(--surface3); border: 1px solid var(--line2); color: var(--dim); border-radius: 9px; padding: 8px 13px; font-size: 12.5px; font-weight: 700; cursor: pointer; white-space: nowrap; }
+      .media-addbtn:hover { color: var(--text); }
+      .media-notes { width: 100%; min-height: 76px; background: var(--bg); border: 1px solid var(--line2); color: var(--text); border-radius: 11px; padding: 10px 12px; font-family: inherit; font-size: 13px; line-height: 1.5; resize: vertical; box-sizing: border-box; }
+      .media-addcard { display: flex; align-items: center; gap: 12px; min-height: 130px; background: transparent; border: 1.5px dashed var(--line2); border-radius: 16px; color: var(--dim); cursor: pointer; padding: 18px; text-align: left; font-family: inherit; }
+      .media-addcard:hover { border-color: var(--accent, #4f8cff); color: var(--text); }
+      .media-plus { font-size: 30px; font-weight: 300; line-height: 1; }
+      .media-addlbl { font-size: 14px; font-weight: 700; }
+      .media-addlbl small { font-weight: 500; color: var(--muted); font-size: 11.5px; }
     </style>
   
     <script src="https://www.gstatic.com/firebasejs/10.12.2/firebase-app-compat.js"></script>
@@ -844,13 +878,17 @@
         </select>
       </div>
 
-      <div class="seg" id="viewseg">
-        <button data-view="board" class="on">Board</button>
-        <button data-view="top">★ Top</button>
-        <button data-view="prod">🎬 Production</button>
-        <button data-view="table">Table</button>
-        <button data-view="analytics">Analytics</button>
-        <button data-view="videos">Videos</button>
+      <div class="field sel viewsel">
+        <svg viewBox="0 0 24 24"><path d="M3 3h8v8H3zm10 0h8v8h-8zM3 13h8v8H3zm10 0h8v8h-8z"/></svg>
+        <select id="viewsel">
+          <option value="board">Board</option>
+          <option value="top">★ Top candidates</option>
+          <option value="prod">🎬 In production</option>
+          <option value="media">🎞 Media to adapt</option>
+          <option value="table">Table</option>
+          <option value="analytics">Analytics</option>
+          <option value="videos">Saved videos</option>
+        </select>
       </div>
 
       <button class="btn" id="scanAllTop" title="Scan every channel's vidIQ 7/30-day views (opens each briefly in the background)">

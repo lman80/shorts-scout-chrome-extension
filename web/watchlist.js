@@ -23,7 +23,7 @@ const ATTR_DIMS = [
 // Stable color per niche (by index) for the column dot.
 const NICHE_COLORS = ["#ff0033", "#4aa8ff", "#ffcb47", "#4ade80", "#c084fc", "#ff8a3d", "#2dd4bf", "#f472b6", "#a3e635", "#60a5fa"];
 
-const state = { watchlist: [], niches: [], nicheParents: {}, tags: [], madeBy: [], madeFor: [], languages: [], savedVideos: [], snapshots: [], vidiqStats: {}, vidiqHistory: {}, topOrder: [], sort: "avg", view: "board", search: "", filterTop: false };
+const state = { watchlist: [], niches: [], nicheParents: {}, tags: [], madeBy: [], madeFor: [], languages: [], savedVideos: [], snapshots: [], vidiqStats: {}, vidiqHistory: {}, topOrder: [], mediaItems: [], sort: "avg", view: "board", search: "", filterTop: false };
 const collapsedSub = new Set(); // collapsed "parent>child" sub-niche sections on the board
 let ignoreNextChange = false;
 const recentCache = {}; // channelId -> { loading } | { recent:[...] } | { error }
@@ -38,11 +38,12 @@ function load() {
   // Ask the background worker to pull the latest from the cloud right away
   // (the periodic alarm also does this every minute). Best-effort.
   try { chrome.runtime.sendMessage({ type: "CLOUD_SYNC" }, () => void chrome.runtime.lastError); } catch (e) {}
-  chrome.storage.local.get(["watchlist", "niches", "nicheParents", "boardPrefs", "savedVideos", "snapshots", "tags", "madeBy", "madeFor", "languages", "vidiqStats", "vidiqHistory", "topOrder"], (d) => {
+  chrome.storage.local.get(["watchlist", "niches", "nicheParents", "boardPrefs", "savedVideos", "snapshots", "tags", "madeBy", "madeFor", "languages", "vidiqStats", "vidiqHistory", "topOrder", "mediaItems"], (d) => {
     state.watchlist = (d.watchlist || []).map(normalize);
     state.vidiqStats = d.vidiqStats || {};
     state.vidiqHistory = d.vidiqHistory || {};
     state.topOrder = d.topOrder || [];
+    state.mediaItems = d.mediaItems || [];
     state.niches = d.niches || [];
     state.nicheParents = d.nicheParents || {};
     state.tags = d.tags && d.tags.length ? d.tags : DEFAULT_TAGS.slice();
@@ -161,6 +162,7 @@ chrome.storage.onChanged.addListener((changes, area) => {
   if (changes.vidiqStats) state.vidiqStats = changes.vidiqStats.newValue || {};
   if (changes.vidiqHistory) state.vidiqHistory = changes.vidiqHistory.newValue || {};
   if (changes.topOrder) state.topOrder = changes.topOrder.newValue || [];
+  if (changes.mediaItems) state.mediaItems = changes.mediaItems.newValue || [];
   seedNichesFromChannels();
   render();
 });
@@ -287,6 +289,8 @@ function render() {
   const keepTcX = prevTc ? prevTc.scrollLeft : 0;
   const keepY = window.scrollY;
 
+  if (state.view === "media") { content.innerHTML = ""; return content.appendChild(renderMedia()); }
+
   if (!state.watchlist.length) {
     content.innerHTML = `
       <div class="empty">
@@ -301,6 +305,7 @@ function render() {
   }
 
   content.innerHTML = "";
+  if (state.view === "media") return content.appendChild(renderMedia());
   if (state.view === "prod") return content.appendChild(renderProduction());
   if (state.view === "top") {
     content.appendChild(renderTopCandidates());
@@ -2171,6 +2176,107 @@ function saveVideos() {
   chrome.storage.local.set({ savedVideos: state.savedVideos });
 }
 
+function saveMedia() {
+  ignoreNextChange = true;
+  chrome.storage.local.set({ mediaItems: state.mediaItems });
+}
+
+// ---- Media to adapt: long-form / old content to turn into shorts -----------
+
+// Pull a YouTube video id out of any common URL shape (watch, youtu.be, shorts, embed).
+function ytId(url) {
+  const m = String(url || "").match(/(?:v=|\/shorts\/|youtu\.be\/|\/embed\/|\/v\/|\/live\/)([A-Za-z0-9_-]{6,})/);
+  if (m) return m[1];
+  const bare = String(url || "").trim();
+  return /^[A-Za-z0-9_-]{6,}$/.test(bare) ? bare : "";
+}
+
+function renderMedia() {
+  const wrap = document.createElement("div");
+  wrap.className = "media";
+  const head = document.createElement("div");
+  head.className = "media-head-row";
+  head.innerHTML = `<div class="media-title-h">🎞 Media to adapt</div>
+    <div class="media-sub">Old or long-form content you want to remember to turn into shorts — add a source, drop in the videos, and take notes.</div>`;
+  wrap.appendChild(head);
+
+  const grid = document.createElement("div");
+  grid.className = "media-grid";
+  (state.mediaItems || []).forEach((m) => grid.appendChild(renderMediaCard(m)));
+
+  const add = document.createElement("button");
+  add.className = "media-addcard";
+  add.innerHTML = `<span class="media-plus">＋</span><span class="media-addlbl">Add a source<br><small>e.g. MythBusters, a movie, a documentary, a podcast…</small></span>`;
+  add.onclick = () => {
+    const title = (prompt("Name this source (e.g. MythBusters):") || "").trim();
+    if (!title) return;
+    state.mediaItems = state.mediaItems || [];
+    state.mediaItems.unshift({ id: "m" + Date.now(), title, videos: [], notes: "", addedAt: Date.now() });
+    saveMedia();
+    render();
+  };
+  grid.appendChild(add);
+  wrap.appendChild(grid);
+  return wrap;
+}
+
+function renderMediaCard(m) {
+  const el = document.createElement("div");
+  el.className = "media-card";
+  const vids = (m.videos || [])
+    .map((v, i) => {
+      const thumb = v.vid ? `https://i.ytimg.com/vi/${v.vid}/mqdefault.jpg` : "";
+      return `<a class="media-vid" href="${esc(v.url)}" target="_blank" rel="noopener" title="${esc(v.title || v.url)}">
+        ${thumb ? `<span class="media-thumb" style="background-image:url('${thumb}')"></span>` : `<span class="media-thumb noimg">▶</span>`}
+        <span class="media-play">▶</span>
+        <button class="media-vdel" data-i="${i}" title="Remove this video">✕</button></a>`;
+    })
+    .join("");
+  el.innerHTML = `
+    <div class="media-card-head">
+      <input class="media-cardtitle" value="${esc(m.title)}" placeholder="Source name">
+      <button class="media-del" title="Delete this source">✕</button>
+    </div>
+    <div class="media-vids">${vids || `<div class="media-empty">No videos yet — paste a YouTube link below.</div>`}</div>
+    <div class="media-addrow">
+      <input class="media-addvid" type="text" placeholder="Paste a YouTube link…">
+      <button class="media-addbtn">＋ Add</button>
+    </div>
+    <textarea class="media-notes" placeholder="What to adapt — the bit, the format, the angle, why it'd work as a short…">${esc(m.notes || "")}</textarea>`;
+
+  el.querySelector(".media-cardtitle").onchange = (e) => { m.title = e.target.value.trim() || "Untitled"; saveMedia(); };
+  el.querySelector(".media-del").onclick = () => {
+    if (confirm("Delete “" + (m.title || "this source") + "” and its videos?")) {
+      state.mediaItems = state.mediaItems.filter((x) => x !== m);
+      saveMedia();
+      render();
+    }
+  };
+  el.querySelector(".media-notes").onchange = (e) => { m.notes = e.target.value; saveMedia(); };
+  el.querySelectorAll(".media-vdel").forEach((b) => {
+    b.onclick = (e) => {
+      e.preventDefault();
+      e.stopPropagation();
+      m.videos.splice(+b.dataset.i, 1);
+      saveMedia();
+      render();
+    };
+  });
+  const addInput = el.querySelector(".media-addvid");
+  const addVid = () => {
+    const url = addInput.value.trim();
+    if (!url) return;
+    m.videos = m.videos || [];
+    m.videos.push({ url, vid: ytId(url), title: "" });
+    addInput.value = "";
+    saveMedia();
+    render();
+  };
+  el.querySelector(".media-addbtn").onclick = addVid;
+  addInput.onkeydown = (e) => { if (e.key === "Enter") { e.preventDefault(); addVid(); } };
+  return el;
+}
+
 // ---- Top Candidates: rankable niche board (drag niches + drag channels) -----
 let tcDrag = null; // { kind: "row"|"col", cid, niche }
 // Auto-scroll while dragging near the viewport edges (so you can drag #4 → #1
@@ -2710,14 +2816,14 @@ function closeNotebook() {
 
 function syncControls() {
   document.getElementById("sort").value = state.sort;
-  document.querySelectorAll("#viewseg button").forEach((b) => b.classList.toggle("on", b.dataset.view === state.view));
+  const vs = document.getElementById("viewsel");
+  if (vs) vs.value = state.view;
 }
 
 document.getElementById("sort").onchange = (e) => { state.sort = e.target.value; save(); render(); };
 document.getElementById("search").oninput = (e) => { state.search = e.target.value; render(); };
-document.querySelectorAll("#viewseg button").forEach((b) => {
-  b.onclick = () => { state.view = b.dataset.view; syncControls(); save(); render(); };
-});
+const viewSel = document.getElementById("viewsel");
+if (viewSel) viewSel.onchange = (e) => { state.view = e.target.value; save(); render(); };
 document.getElementById("refresh").onclick = doRefresh;
 const scanAllBtn = document.getElementById("scanAll");
 if (scanAllBtn) {
