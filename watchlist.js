@@ -2150,6 +2150,30 @@ function saveVideos() {
 
 // ---- Top Candidates: rankable niche board (drag niches + drag channels) -----
 let tcDrag = null; // { kind: "row"|"col", cid, niche }
+// Auto-scroll while dragging near the viewport edges (so you can drag #4 → #1
+// in one motion). Tracks the pointer via dragover and scrolls on a rAF loop.
+let tcPointer = { x: 0, y: 0 }, tcScrollRAF = null;
+document.addEventListener("dragover", (e) => { if (tcDrag) { tcPointer.x = e.clientX; tcPointer.y = e.clientY; } }, true);
+function tcAutoScrollStep() {
+  if (!tcDrag) { tcScrollRAF = null; return; }
+  const EDGE = 110, MAX = 26, y = tcPointer.y, h = innerHeight;
+  let dy = 0;
+  if (y > 0 && y < EDGE) dy = -Math.ceil((MAX * (EDGE - y)) / EDGE);
+  else if (y > h - EDGE) dy = Math.ceil((MAX * (y - (h - EDGE))) / EDGE);
+  if (dy) window.scrollBy(0, dy);
+  if (tcDrag.kind === "col") {
+    const board = document.querySelector(".tc-board");
+    if (board) {
+      const x = tcPointer.x, w = innerWidth; let dx = 0;
+      if (x > 0 && x < EDGE) dx = -Math.ceil((MAX * (EDGE - x)) / EDGE);
+      else if (x > w - EDGE) dx = Math.ceil((MAX * (x - (w - EDGE))) / EDGE);
+      if (dx) board.scrollLeft += dx;
+    }
+  }
+  tcScrollRAF = requestAnimationFrame(tcAutoScrollStep);
+}
+function tcStartScroll() { if (!tcScrollRAF) tcScrollRAF = requestAnimationFrame(tcAutoScrollStep); }
+function tcStopScroll() { if (tcScrollRAF) { cancelAnimationFrame(tcScrollRAF); tcScrollRAF = null; } }
 function topCandidatesList() {
   const q = (state.search || "").toLowerCase();
   let cands = state.watchlist.filter((c) => c.topCandidate);
@@ -2213,15 +2237,15 @@ function renderTopColumn(niche, list) {
 }
 
 function wireTopRow(row, c, niche) {
-  row.addEventListener("dragstart", (e) => { e.stopPropagation(); tcDrag = { kind: "row", cid: c.channelId, niche }; row.classList.add("tc-dragging"); try { e.dataTransfer.effectAllowed = "move"; e.dataTransfer.setData("text/plain", "r"); } catch (x) {} });
-  row.addEventListener("dragend", (e) => { e.stopPropagation(); row.classList.remove("tc-dragging"); tcDrag = null; });
+  row.addEventListener("dragstart", (e) => { e.stopPropagation(); tcDrag = { kind: "row", cid: c.channelId, niche }; row.classList.add("tc-dragging"); tcStartScroll(); try { e.dataTransfer.effectAllowed = "move"; e.dataTransfer.setData("text/plain", "r"); } catch (x) {} });
+  row.addEventListener("dragend", (e) => { e.stopPropagation(); row.classList.remove("tc-dragging"); tcDrag = null; tcStopScroll(); });
   row.addEventListener("dragover", (e) => { if (tcDrag && tcDrag.kind === "row") { e.preventDefault(); e.stopPropagation(); row.classList.add("tc-over"); } });
   row.addEventListener("dragleave", () => row.classList.remove("tc-over"));
   row.addEventListener("drop", (e) => { if (tcDrag && tcDrag.kind === "row") { e.preventDefault(); e.stopPropagation(); row.classList.remove("tc-over"); moveTopRank(tcDrag.cid, c.channelId, niche); } });
 }
 function wireTopCol(col, niche) {
-  col.addEventListener("dragstart", (e) => { if (tcDrag && tcDrag.kind === "row") return; tcDrag = { kind: "col", niche }; col.classList.add("tc-coldragging"); try { e.dataTransfer.effectAllowed = "move"; e.dataTransfer.setData("text/plain", "c"); } catch (x) {} });
-  col.addEventListener("dragend", () => { col.classList.remove("tc-coldragging"); tcDrag = null; });
+  col.addEventListener("dragstart", (e) => { if (tcDrag && tcDrag.kind === "row") return; tcDrag = { kind: "col", niche }; col.classList.add("tc-coldragging"); tcStartScroll(); try { e.dataTransfer.effectAllowed = "move"; e.dataTransfer.setData("text/plain", "c"); } catch (x) {} });
+  col.addEventListener("dragend", () => { col.classList.remove("tc-coldragging"); tcDrag = null; tcStopScroll(); });
   col.addEventListener("dragover", (e) => { if (tcDrag && tcDrag.kind === "col") { e.preventDefault(); col.classList.add("tc-colover"); } });
   col.addEventListener("dragleave", () => col.classList.remove("tc-colover"));
   col.addEventListener("drop", (e) => { if (tcDrag && tcDrag.kind === "col" && niche !== UNSORTED && tcDrag.niche !== niche) { e.preventDefault(); col.classList.remove("tc-colover"); moveNicheOrder(tcDrag.niche, niche); } });
