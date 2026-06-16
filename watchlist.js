@@ -278,6 +278,9 @@ function render() {
   const content = document.getElementById("content");
   const prevBoard = content.querySelector(".board");
   const keepScrollX = prevBoard ? prevBoard.scrollLeft : 0;
+  const prevTc = content.querySelector(".tc-board");
+  const keepTcX = prevTc ? prevTc.scrollLeft : 0;
+  const keepY = window.scrollY;
 
   if (!state.watchlist.length) {
     content.innerHTML = `
@@ -293,7 +296,13 @@ function render() {
   }
 
   content.innerHTML = "";
-  if (state.view === "top") return content.appendChild(renderTopCandidates());
+  if (state.view === "top") {
+    content.appendChild(renderTopCandidates());
+    const tb = content.querySelector(".tc-board");
+    if (tb && keepTcX) tb.scrollLeft = keepTcX;     // keep horizontal scroll on reorder
+    if (keepY) window.scrollTo(0, keepY);            // keep vertical scroll on reorder
+    return;
+  }
   if (state.view === "analytics") return content.appendChild(renderAnalytics());
   if (state.view === "videos") return content.appendChild(renderVideos());
   if (needsRefresh()) content.appendChild(refreshBanner());
