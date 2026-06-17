@@ -326,7 +326,14 @@
     panel.style.display = "block";
   }
 
-  // ---- channel action buttons (copy / open / save) --------------------------
+  // ---- channel action buttons (copy / open / viewstats / save) --------------
+
+  // ViewStats per-channel "Videos" tab (sortable by most viewed, Longs/Shorts).
+  // Needs the @handle; falls back to ViewStats home if the channel has none.
+  function viewStatsUrl(channel) {
+    const h = ((channel && channel.customUrl) || "").trim().replace(/^@/, "");
+    return h ? `https://www.viewstats.com/@${h}/videos` : "https://www.viewstats.com/";
+  }
 
   function channelActionsHtml(channel) {
     const saved = inWatchlist(channel.channelId);
@@ -334,6 +341,7 @@
       <div class="ssct-actions">
         <button class="ssct-act" type="button" data-act="copy">📋 Copy URL</button>
         <button class="ssct-act" type="button" data-act="open">↗ Open</button>
+        <button class="ssct-act" type="button" data-act="viewstats" title="Open this channel's top videos on ViewStats">📊 ViewStats</button>
         <button class="ssct-act ${
           saved ? "ssct-act-saved" : ""
         }" type="button" data-act="star">${saved ? "★ Saved" : "☆ Save"}</button>
@@ -345,6 +353,9 @@
 
     const open = panel.querySelector('[data-act="open"]');
     if (open) open.onclick = () => openTab(channelUrl);
+
+    const vs = panel.querySelector('[data-act="viewstats"]');
+    if (vs) vs.onclick = () => openTab(viewStatsUrl(channel));
 
     const copy = panel.querySelector('[data-act="copy"]');
     if (copy) {
