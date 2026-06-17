@@ -23,7 +23,7 @@ const ATTR_DIMS = [
 // Stable color per niche (by index) for the column dot.
 const NICHE_COLORS = ["#ff0033", "#4aa8ff", "#ffcb47", "#4ade80", "#c084fc", "#ff8a3d", "#2dd4bf", "#f472b6", "#a3e635", "#60a5fa"];
 
-const state = { watchlist: [], niches: [], nicheParents: {}, tags: [], madeBy: [], madeFor: [], languages: [], savedVideos: [], snapshots: [], vidiqStats: {}, vidiqHistory: {}, topOrder: [], mediaItems: [], sort: "avg", view: "board", search: "", filterTop: false };
+const state = { watchlist: [], niches: [], nicheParents: {}, tags: [], madeBy: [], madeFor: [], languages: [], savedVideos: [], snapshots: [], vidiqStats: {}, vidiqHistory: {}, topOrder: [], mediaItems: [], productions: [], sort: "avg", view: "board", search: "", filterTop: false };
 const collapsedSub = new Set(); // collapsed "parent>child" sub-niche sections on the board
 let ignoreNextChange = false;
 const recentCache = {}; // channelId -> { loading } | { recent:[...] } | { error }
@@ -38,12 +38,23 @@ function load() {
   // Ask the background worker to pull the latest from the cloud right away
   // (the periodic alarm also does this every minute). Best-effort.
   try { chrome.runtime.sendMessage({ type: "CLOUD_SYNC" }, () => void chrome.runtime.lastError); } catch (e) {}
-  chrome.storage.local.get(["watchlist", "niches", "nicheParents", "boardPrefs", "savedVideos", "snapshots", "tags", "madeBy", "madeFor", "languages", "vidiqStats", "vidiqHistory", "topOrder", "mediaItems"], (d) => {
+  chrome.storage.local.get(["watchlist", "niches", "nicheParents", "boardPrefs", "savedVideos", "snapshots", "tags", "madeBy", "madeFor", "languages", "vidiqStats", "vidiqHistory", "topOrder", "mediaItems", "productions"], (d) => {
     state.watchlist = (d.watchlist || []).map(normalize);
     state.vidiqStats = d.vidiqStats || {};
     state.vidiqHistory = d.vidiqHistory || {};
     state.topOrder = d.topOrder || [];
     state.mediaItems = d.mediaItems || [];
+    state.productions = (d.productions || []).map(normalizeProduction);
+    // One-time migration: turn legacy per-channel inProduction flags into productions.
+    if (d.productions === undefined) {
+      const migrated = state.watchlist.filter((c) => c.inProduction).map((c) => ({
+        id: "p" + c.channelId, name: c.title || "Channel", description: "",
+        stage: c.prodStatus || "Idea", inspirations: [c.channelId],
+        steps: Array.isArray(c.prodSteps) ? c.prodSteps : [], notes: c.prodNotes || "",
+        addedAt: c.addedAt || Date.now(),
+      }));
+      if (migrated.length) { state.productions = migrated; chrome.storage.local.set({ productions: migrated }); }
+    }
     state.niches = d.niches || [];
     state.nicheParents = d.nicheParents || {};
     state.tags = d.tags && d.tags.length ? d.tags : DEFAULT_TAGS.slice();
@@ -163,6 +174,7 @@ chrome.storage.onChanged.addListener((changes, area) => {
   if (changes.vidiqHistory) state.vidiqHistory = changes.vidiqHistory.newValue || {};
   if (changes.topOrder) state.topOrder = changes.topOrder.newValue || [];
   if (changes.mediaItems) state.mediaItems = changes.mediaItems.newValue || [];
+  if (changes.productions) state.productions = (changes.productions.newValue || []).map(normalizeProduction);
   seedNichesFromChannels();
   render();
 });
@@ -861,8 +873,9 @@ function renderCard(c) {
     .map((ex, i) => `<a class="ex" href="${esc(ex.url)}" target="_blank" rel="noopener"><span class="lbl">${esc(ex.title || ex.url)}</span><span class="rm" data-rmex="${i}" title="Remove">✕</span></a>`)
     .join("");
 
+  const inProd = channelInAnyProduction(c.channelId);
   card.innerHTML = `
-    ${c.inProduction ? `<div class="card-prodflag">🎬 IN PRODUCTION</div>` : ""}
+    ${inProd ? `<div class="card-prodflag">🎬 INSPIRING A BUILD</div>` : ""}
     ${c.topCandidate ? `<div class="card-topflag">★ TOP CANDIDATE</div>` : ""}
     ${nicheChipsHtml}
     ${tagChips}
@@ -872,7 +885,7 @@ function renderCard(c) {
         <a class="card-name" href="${channelUrl(c)}" target="_blank" rel="noopener">${esc(c.title) || "Channel"}</a>
         <div class="card-handle">${handle || "&nbsp;"}</div>
       </div>
-      <button class="card-prod ${c.inProduction ? "on" : ""}" title="${c.inProduction ? "In production" : "Start production"}">🎬</button>
+      <button class="card-prod ${inProd ? "on" : ""}" title="${inProd ? "Feeding a production — manage in the Production view" : "Use as inspiration for a production"}">🎬</button>
       <button class="card-star ${c.topCandidate ? "on" : ""}" title="${c.topCandidate ? "Top candidate" : "Mark as top candidate"}">${c.topCandidate ? "★" : "☆"}</button>
       <button class="card-x" title="Remove">✕</button>
     </div>
@@ -1168,10 +1181,15 @@ function wireCard(card, c) {
 
   card.querySelector(".card-x").onclick = () => removeChannel(c.channelId);
   card.querySelector(".card-prod").onclick = () => {
-    c.inProduction = !c.inProduction;
-    if (c.inProduction && !c.prodStatus) c.prodStatus = "Idea";
-    save(); render();
-    toast(c.inProduction ? "Added to In Production 🎬" : "Removed from production");
+    if (channelInAnyProduction(c.channelId)) {
+      state.view = "prod"; save(); render();
+      toast("Already inspiring a production 🎬");
+      return;
+    }
+    state.productions.unshift(normalizeProduction({ name: "", stage: "Idea", inspirations: [c.channelId] }));
+    saveProd();
+    state.view = "prod"; save(); render();
+    toast("Started a production 🎬 — name it & add more inspiration");
   };
   card.querySelector(".card-star").onclick = () => {
     c.topCandidate = !c.topCandidate;
@@ -2422,48 +2440,87 @@ function psTreeHtml(steps, prefix) {
   }).join("") + `</ul>`;
 }
 
-// ---- In Production: a workspace per channel you're actively building ---------
+// ---- In Production: a workspace per channel you're building ------------------
+// A "production" is a channel you're creating: a name, a description, the
+// inspiration channels (many) feeding it, a steps checklist, and notes.
+function normalizeProduction(p) {
+  p = p || {};
+  return {
+    id: p.id || ("p" + Date.now() + Math.floor(Math.random() * 1000)),
+    name: p.name || "",
+    description: p.description || "",
+    stage: p.stage || "Idea",
+    inspirations: Array.isArray(p.inspirations) ? p.inspirations : [],
+    steps: Array.isArray(p.steps) ? p.steps : [],
+    notes: p.notes || "",
+    addedAt: p.addedAt || Date.now(),
+  };
+}
+function saveProd() {
+  ignoreNextChange = true;
+  chrome.storage.local.set({ productions: state.productions });
+}
+// Is this channel an inspiration in any production? (drives the board 🎬 state)
+function channelInAnyProduction(channelId) {
+  return (state.productions || []).some((p) => (p.inspirations || []).includes(channelId));
+}
+
 function renderProduction() {
   const wrap = document.createElement("div");
   wrap.className = "production";
-  let list = state.watchlist.filter((c) => c.inProduction);
+  const head = document.createElement("div");
+  head.className = "prod-head-row";
+  const count = state.productions.length;
+  head.innerHTML = `<div class="prod-head-l"><div class="prod-title-h">🎬 In Production</div>
+      <div class="prod-sub">${count ? `${count} channel${count === 1 ? "" : "s"} you're building` : "Channels you're building — name one, add the channels that inspire it, then track the steps."}</div></div>
+    <button class="prod-new">＋ New production</button>`;
+  head.querySelector(".prod-new").onclick = () => {
+    const name = (prompt("Name the channel you're building:") || "").trim();
+    if (!name) return;
+    state.productions.unshift(normalizeProduction({ name, stage: "Idea" }));
+    saveProd();
+    render();
+  };
+  wrap.appendChild(head);
+
+  let list = state.productions;
   const q = (state.search || "").toLowerCase();
-  if (q) list = list.filter((c) => (c.title || "").toLowerCase().includes(q));
-  if (!list.length) {
-    wrap.innerHTML = `<div class="empty"><div><div class="big">🎬</div><h2>Nothing in production yet</h2><p>On any channel card, tap the <b>🎬</b> button to start building content modeled on it. It lands here with a stage tracker, a steps checklist, and a big notes pad.</p></div></div>`;
+  if (q) list = list.filter((p) => (p.name || "").toLowerCase().includes(q) || (p.description || "").toLowerCase().includes(q));
+
+  if (!state.productions.length) {
+    const empty = document.createElement("div");
+    empty.className = "empty";
+    empty.innerHTML = `<div><div class="big">🎬</div><h2>Nothing in production yet</h2><p>Tap <b>＋ New production</b> above to start a channel you're building. Give it a name and description, add the channels that inspire it, then track your steps and notes.</p></div>`;
+    wrap.appendChild(empty);
     return wrap;
   }
-  const head = document.createElement("div");
-  head.className = "tc-head";
-  head.innerHTML = `🎬 In Production <span>${list.length} channel${list.length === 1 ? "" : "s"} you're building</span>`;
-  wrap.appendChild(head);
-  list.forEach((c) => wrap.appendChild(renderProdCard(c)));
+  list.forEach((p) => wrap.appendChild(renderProdCard(p)));
   return wrap;
 }
 
-function renderProdCard(c) {
+function renderProdCard(p) {
   const el = document.createElement("div");
   el.className = "prod-card";
-  const mom = vqMomentum(c);
-  const stageOpts = PROD_STAGES.map((s) => `<option value="${esc(s)}"${c.prodStatus === s ? " selected" : ""}>${esc(s)}</option>`).join("");
-  const niches = (c.niches || []).map((n) => `<span class="chip niche" style="background:${nicheColor(n)}">${esc(n)}</span>`).join("");
+  const stageOpts = PROD_STAGES.map((s) => `<option value="${esc(s)}"${p.stage === s ? " selected" : ""}>${esc(s)}</option>`).join("");
   el.innerHTML = `
-    <div class="prod-top${c.repVideoId ? " has-rep" : ""}">
-      ${avatarHtml(c, "prod-av")}
+    <div class="prod-top">
       <div class="prod-id">
-        <a class="prod-name" href="${channelUrl(c)}" target="_blank" rel="noopener">${esc(c.title) || "Channel"}</a>
-        ${niches ? `<div class="prod-niches">${niches}</div>` : ""}
+        <input class="prod-nameinput" value="${esc(p.name)}" placeholder="Channel name (the one you're building)">
+        <textarea class="prod-desc" placeholder="What is this channel about? The premise, the angle, who it's for…">${esc(p.description)}</textarea>
       </div>
-      <select class="prod-stage" title="Production stage">${stageOpts}</select>
-      <button class="prod-remove" title="Remove from production">✕</button>
+      <div class="prod-topright">
+        <select class="prod-stage" title="Production stage">${stageOpts}</select>
+        <button class="prod-remove" title="Delete this production">🗑</button>
+      </div>
     </div>
-    <div class="prod-refstats">
-      <span>👁 7d <b>${vq7(c) ? compact(vq7(c)) : "—"}</b></span>
-      <span>30d <b>${vq30(c) ? compact(vq30(c)) : "—"}</b></span>
-      ${mom != null ? `<span class="mom ${mom >= 1.1 ? "up" : mom <= 0.9 ? "down" : ""}">${mom >= 1.1 ? "🔥" : mom <= 0.9 ? "❄️" : "→"} ${mom >= 1 ? "+" : ""}${Math.round((mom - 1) * 100)}%</span>` : ""}
-      <span>avg/vid <b>${compact(avgPerVideo(c))}</b></span>
-      <span>👤 <b>${compact(c.subscribers)}</b></span>
-      <button class="prod-review">▶ Review their shorts</button>
+    <div class="prod-insp">
+      <div class="prod-insp-head">✨ Inspiration channels <span class="prod-insp-count">${(p.inspirations || []).length || ""}</span>
+        <button class="prod-insp-add">＋ Add</button></div>
+      <div class="prod-insp-grid"></div>
+      <div class="prod-insp-picker" hidden>
+        <input class="prod-insp-search" type="text" placeholder="Search your watchlist…">
+        <div class="prod-insp-options"></div>
+      </div>
     </div>
     <div class="prod-body">
       <div class="prod-col">
@@ -2473,24 +2530,84 @@ function renderProdCard(c) {
       </div>
       <div class="prod-col notes">
         <div class="prod-h">📝 Notes</div>
-        <textarea class="prod-notesarea" placeholder="Everything you're doing on this one — script ideas, the hook, format breakdown, what's working, what to test next…">${esc(c.prodNotes || "")}</textarea>
+        <textarea class="prod-notesarea" placeholder="Everything you're doing on this one — script ideas, the hook, format breakdown, what's working, what to test next…">${esc(p.notes || "")}</textarea>
       </div>
     </div>`;
-  el.querySelector(".prod-stage").onchange = (e) => { c.prodStatus = e.target.value; save(); };
-  el.querySelector(".prod-remove").onclick = () => { c.inProduction = false; save(); render(); };
-  el.querySelector(".prod-review").onclick = () => openReview(c.channelId);
-  el.querySelector(".prod-notesarea").onchange = (e) => { c.prodNotes = e.target.value; save(); };
-  if (c.repVideoId) {
-    const top = el.querySelector(".prod-top");
-    top.addEventListener("mouseenter", () => showRepPreview(c, top));
-    top.addEventListener("mouseleave", hideRepPreview);
-  }
+
+  el.querySelector(".prod-nameinput").onchange = (e) => { p.name = e.target.value.trim() || "Untitled"; saveProd(); };
+  el.querySelector(".prod-desc").onchange = (e) => { p.description = e.target.value; saveProd(); };
+  el.querySelector(".prod-stage").onchange = (e) => { p.stage = e.target.value; saveProd(); };
+  el.querySelector(".prod-notesarea").onchange = (e) => { p.notes = e.target.value; saveProd(); };
+  el.querySelector(".prod-remove").onclick = () => {
+    if (confirm("Delete the production “" + (p.name || "this one") + "”? Your saved channels aren't affected.")) {
+      state.productions = state.productions.filter((x) => x !== p);
+      saveProd();
+      render();
+    }
+  };
+
+  // ---- inspiration channels ----
+  const grid = el.querySelector(".prod-insp-grid");
+  const drawInsp = () => {
+    el.querySelector(".prod-insp-count").textContent = (p.inspirations || []).length || "";
+    if (!(p.inspirations || []).length) {
+      grid.innerHTML = `<div class="prod-insp-empty">No inspiration yet — tap ＋ Add to pull in channels from your watchlist.</div>`;
+      return;
+    }
+    grid.innerHTML = (p.inspirations || []).map((id) => {
+      const c = state.watchlist.find((x) => x.channelId === id);
+      if (!c) return "";
+      return `<div class="ins-card${c.repVideoId ? " has-rep" : ""}" data-ch="${esc(id)}">
+        ${avatarHtml(c, "ins-av")}
+        <div class="ins-meta">
+          <a class="ins-name" href="${channelUrl(c)}" target="_blank" rel="noopener">${esc(c.title) || "Channel"}</a>
+          <div class="ins-stat">${compact(avgPerVideo(c))}/vid · 👤 ${compact(c.subscribers)}</div>
+        </div>
+        <button class="ins-rm" data-ch="${esc(id)}" title="Remove">✕</button>
+      </div>`;
+    }).join("");
+    grid.querySelectorAll(".ins-rm").forEach((b) => {
+      b.onclick = (e) => { e.stopPropagation(); p.inspirations = p.inspirations.filter((x) => x !== b.dataset.ch); saveProd(); drawInsp(); };
+    });
+    grid.querySelectorAll(".ins-card.has-rep").forEach((card) => {
+      const c = state.watchlist.find((x) => x.channelId === card.dataset.ch);
+      if (!c) return;
+      card.addEventListener("mouseenter", () => showRepPreview(c, card));
+      card.addEventListener("mouseleave", hideRepPreview);
+    });
+  };
+  drawInsp();
+
+  const picker = el.querySelector(".prod-insp-picker");
+  const search = el.querySelector(".prod-insp-search");
+  const options = el.querySelector(".prod-insp-options");
+  const drawOptions = () => {
+    const qq = (search.value || "").toLowerCase();
+    const avail = state.watchlist
+      .filter((c) => !(p.inspirations || []).includes(c.channelId))
+      .filter((c) => !qq || (c.title || "").toLowerCase().includes(qq))
+      .sort((a, b) => (b.totalViews || 0) - (a.totalViews || 0))
+      .slice(0, 40);
+    options.innerHTML = avail.length
+      ? avail.map((c) => `<button class="ins-opt" data-ch="${esc(c.channelId)}">${avatarHtml(c, "ins-opt-av")}<span class="ins-opt-name">${esc(c.title) || "Channel"}</span><span class="ins-opt-add">＋</span></button>`).join("")
+      : `<div class="prod-insp-empty">No matching channels in your watchlist.</div>`;
+    options.querySelectorAll(".ins-opt").forEach((b) => {
+      b.onclick = () => { p.inspirations.push(b.dataset.ch); saveProd(); drawInsp(); drawOptions(); search.focus(); };
+    });
+  };
+  el.querySelector(".prod-insp-add").onclick = () => {
+    const show = picker.hasAttribute("hidden");
+    if (show) { picker.removeAttribute("hidden"); drawOptions(); search.focus(); } else { picker.setAttribute("hidden", ""); }
+  };
+  search.oninput = drawOptions;
+
+  // ---- steps checklist (nested) ----
   const steplist = el.querySelector(".prod-steplist");
   const redraw = () => {
-    if (!Array.isArray(c.prodSteps)) c.prodSteps = [];
-    const { done, total } = psCounts(c.prodSteps);
+    if (!Array.isArray(p.steps)) p.steps = [];
+    const { done, total } = psCounts(p.steps);
     const pct = total ? Math.round((done / total) * 100) : 0;
-    steplist.innerHTML = (c.prodSteps.length ? psTreeHtml(c.prodSteps, "") : `<div class="prod-empty">No steps yet — add your first below.</div>`)
+    steplist.innerHTML = (p.steps.length ? psTreeHtml(p.steps, "") : `<div class="prod-empty">No steps yet — add your first below.</div>`)
       + (total ? `<div class="prod-progress"><div class="prod-bar"><div class="prod-barfill" style="width:${pct}%"></div></div><span>${done}/${total}</span></div>` : "");
   };
   function startEdit(span) {
@@ -2499,11 +2616,11 @@ function renderProdCard(c) {
     const finish = () => {
       span.removeEventListener("blur", finish);
       span.contentEditable = "false"; span.classList.remove("editing");
-      const L = psLocate(c.prodSteps, span.dataset.path);
+      const L = psLocate(p.steps, span.dataset.path);
       if (L && L.node) {
         L.node.text = (span.textContent || "").trim();
         if (!L.node.text && !(L.node.children || []).length) L.arr.splice(L.i, 1); // drop empty leaf
-        save();
+        saveProd();
       }
       redraw();
     };
@@ -2513,15 +2630,15 @@ function renderProdCard(c) {
   const focusEdit = (path) => { const s = steplist.querySelector('.ps-text[data-path="' + path + '"]'); if (s) startEdit(s); };
   steplist.addEventListener("click", (e) => {
     const t = e.target;
-    if (t.classList.contains("ps-caret")) { const L = psLocate(c.prodSteps, t.dataset.path); if (L && L.node) { L.node.collapsed = !L.node.collapsed; save(); redraw(); } return; }
-    if (t.classList.contains("ps-check")) { const L = psLocate(c.prodSteps, t.dataset.path); if (L && L.node) { psSetDone(L.node, psState(L.node) !== "checked"); save(); redraw(); } return; }
-    if (t.classList.contains("ps-add")) { const L = psLocate(c.prodSteps, t.dataset.path); if (L && L.node) { if (!Array.isArray(L.node.children)) L.node.children = []; L.node.children.push({ text: "", done: false, children: [] }); L.node.collapsed = false; save(); redraw(); focusEdit(t.dataset.path + "-" + (L.node.children.length - 1)); } return; }
-    if (t.classList.contains("ps-del")) { const L = psLocate(c.prodSteps, t.dataset.path); if (L) { L.arr.splice(L.i, 1); save(); redraw(); } return; }
+    if (t.classList.contains("ps-caret")) { const L = psLocate(p.steps, t.dataset.path); if (L && L.node) { L.node.collapsed = !L.node.collapsed; saveProd(); redraw(); } return; }
+    if (t.classList.contains("ps-check")) { const L = psLocate(p.steps, t.dataset.path); if (L && L.node) { psSetDone(L.node, psState(L.node) !== "checked"); saveProd(); redraw(); } return; }
+    if (t.classList.contains("ps-add")) { const L = psLocate(p.steps, t.dataset.path); if (L && L.node) { if (!Array.isArray(L.node.children)) L.node.children = []; L.node.children.push({ text: "", done: false, children: [] }); L.node.collapsed = false; saveProd(); redraw(); focusEdit(t.dataset.path + "-" + (L.node.children.length - 1)); } return; }
+    if (t.classList.contains("ps-del")) { const L = psLocate(p.steps, t.dataset.path); if (L) { L.arr.splice(L.i, 1); saveProd(); redraw(); } return; }
     if (t.classList.contains("ps-text")) { startEdit(t); return; }
   });
   redraw();
   const addInput = el.querySelector(".prod-addinput");
-  const addStep = () => { const t = addInput.value.trim(); if (!t) return; c.prodSteps.push({ text: t, done: false, children: [] }); addInput.value = ""; save(); redraw(); addInput.focus(); };
+  const addStep = () => { const t = addInput.value.trim(); if (!t) return; p.steps.push({ text: t, done: false, children: [] }); addInput.value = ""; saveProd(); redraw(); addInput.focus(); };
   el.querySelector(".prod-addbtn").onclick = addStep;
   addInput.onkeydown = (e) => { if (e.key === "Enter") { e.preventDefault(); addStep(); } };
   return el;
