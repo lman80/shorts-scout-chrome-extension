@@ -83,6 +83,19 @@
 #ssct-panel .ssct-watch-open:hover {
   border-color: #ffd24d;
 }
+#ssct-panel .ssct-topshort {
+  background: #1b1b1b;
+  border: 1px solid #2a2a2a;
+  color: #ff7a5a;
+  cursor: pointer;
+  font: 700 11px/1 Roboto, Arial, sans-serif;
+  padding: 4px 9px;
+  border-radius: 999px;
+  white-space: nowrap;
+}
+#ssct-panel .ssct-topshort:hover {
+  border-color: #ff7a5a;
+}
 #ssct-panel .ssct-watch-count {
   color: #fff;
 }

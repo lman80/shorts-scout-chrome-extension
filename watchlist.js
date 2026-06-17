@@ -202,11 +202,6 @@ function esc(s) {
 function channelUrl(c) {
   return `https://www.youtube.com/channel/${c.channelId}`;
 }
-// ViewStats per-channel "Videos" tab (sortable by most viewed). Needs the @handle.
-function viewStatsUrl(c) {
-  const h = ((c && c.customUrl) || "").trim().replace(/^@/, "");
-  return h ? `https://www.viewstats.com/@${h}/videos` : "https://www.viewstats.com/";
-}
 function findChannel(id) {
   return state.watchlist.find((c) => c.channelId === id);
 }
@@ -927,7 +922,6 @@ function renderCard(c) {
 
     <div class="foot">
       <button class="ico" data-act="review">▶ Review</button>
-      <button class="ico" data-act="viewstats" title="Open this channel's top videos on ViewStats">📊 ViewStats</button>
       <button class="ico" data-act="notes">📝 Notes</button>
       <button class="ico" data-act="copy">📋 URL</button>
     </div>
@@ -1223,7 +1217,6 @@ function wireCard(card, c) {
   });
   card.querySelector('[data-act="labels"]').onclick = () => toggleCardLabelEditor(card, c);
   card.querySelector('[data-act="review"]').onclick = () => openReview(c.channelId);
-  card.querySelector('[data-act="viewstats"]').onclick = () => window.open(viewStatsUrl(c), "_blank", "noopener");
   card.querySelector('[data-act="copy"]').onclick = (e) => {
     navigator.clipboard.writeText(channelUrl(c));
     toast("Channel URL copied");
@@ -1671,7 +1664,6 @@ function renderDrawer() {
       <div style="flex:1;min-width:0">
         <div class="dw-name">${esc(c.title) || "Channel"}</div>
         <a class="dw-link" href="${channelUrl(c)}/shorts" target="_blank" rel="noopener">Open on YouTube ↗</a>
-        <a class="dw-link" href="${viewStatsUrl(c)}" target="_blank" rel="noopener" title="Top videos on ViewStats">📊 ViewStats ↗</a>
       </div>
       <button class="dw-x" title="Close (Esc)">✕</button>
     </div>

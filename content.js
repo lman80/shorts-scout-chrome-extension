@@ -198,11 +198,17 @@
     panel.style.display = "none";
   }
 
+  // ViewStats' most-viewed Shorts for the latest full day ("top short today").
+  const TOP_SHORT_TODAY_URL =
+    "https://www.viewstats.com/top-list?filterBy=views&interval=ms_yesterday&madeForKids=true&movies=true&musicChannels=true&tab=videos&videoType=shorts";
+
   function wireHeader() {
     const c = panel.querySelector(".ssct-close");
     if (c) c.onclick = collapsePanel;
     const w = panel.querySelector(".ssct-watch-open");
     if (w) w.onclick = () => renderWatchlist();
+    const t = panel.querySelector(".ssct-topshort");
+    if (t) t.onclick = () => openTab(TOP_SHORT_TODAY_URL);
   }
 
   function shell(inner) {
@@ -210,6 +216,7 @@
       <div class="ssct-head">
         <span class="ssct-title">Shorts Scout</span>
         <div class="ssct-head-right">
+          <button class="ssct-topshort" type="button" title="Open ViewStats: most-viewed Shorts today">🔥 Top short today</button>
           <button class="ssct-watch-open" type="button" title="Open watchlist">★ <span class="ssct-watch-count">${watchlist.length}</span></button>
           <button class="ssct-close" type="button" aria-label="Collapse" title="Collapse — stays hidden until you reopen with the 📊 button">✕</button>
         </div>
@@ -326,14 +333,7 @@
     panel.style.display = "block";
   }
 
-  // ---- channel action buttons (copy / open / viewstats / save) --------------
-
-  // ViewStats per-channel "Videos" tab (sortable by most viewed, Longs/Shorts).
-  // Needs the @handle; falls back to ViewStats home if the channel has none.
-  function viewStatsUrl(channel) {
-    const h = ((channel && channel.customUrl) || "").trim().replace(/^@/, "");
-    return h ? `https://www.viewstats.com/@${h}/videos` : "https://www.viewstats.com/";
-  }
+  // ---- channel action buttons (copy / open / save) --------------------------
 
   function channelActionsHtml(channel) {
     const saved = inWatchlist(channel.channelId);
@@ -341,7 +341,6 @@
       <div class="ssct-actions">
         <button class="ssct-act" type="button" data-act="copy">📋 Copy URL</button>
         <button class="ssct-act" type="button" data-act="open">↗ Open</button>
-        <button class="ssct-act" type="button" data-act="viewstats" title="Open this channel's top videos on ViewStats">📊 ViewStats</button>
         <button class="ssct-act ${
           saved ? "ssct-act-saved" : ""
         }" type="button" data-act="star">${saved ? "★ Saved" : "☆ Save"}</button>
@@ -353,9 +352,6 @@
 
     const open = panel.querySelector('[data-act="open"]');
     if (open) open.onclick = () => openTab(channelUrl);
-
-    const vs = panel.querySelector('[data-act="viewstats"]');
-    if (vs) vs.onclick = () => openTab(viewStatsUrl(channel));
 
     const copy = panel.querySelector('[data-act="copy"]');
     if (copy) {
