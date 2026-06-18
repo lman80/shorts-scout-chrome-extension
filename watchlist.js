@@ -2941,6 +2941,11 @@ document.getElementById("sort").onchange = (e) => { state.sort = e.target.value;
 document.getElementById("search").oninput = (e) => { state.search = e.target.value; render(); };
 const viewSel = document.getElementById("viewsel");
 if (viewSel) viewSel.onchange = (e) => { state.view = e.target.value; save(); render(); };
+// ViewStats' most-viewed Shorts for the latest full day ("top short today").
+const TOP_SHORT_TODAY_URL =
+  "https://www.viewstats.com/top-list?filterBy=views&interval=ms_yesterday&madeForKids=true&movies=true&musicChannels=true&tab=videos&videoType=shorts";
+const topShortBtn = document.getElementById("topShortBtn");
+if (topShortBtn) topShortBtn.onclick = () => window.open(TOP_SHORT_TODAY_URL, "_blank", "noopener");
 document.getElementById("refresh").onclick = doRefresh;
 const scanAllBtn = document.getElementById("scanAll");
 if (scanAllBtn) {
