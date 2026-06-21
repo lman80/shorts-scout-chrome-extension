@@ -730,8 +730,8 @@ function setRep(c, videoId) {
 // Open a channel in a hidden background tab, let vidIQ load, capture its 7/30-day
 // views (content.js does the reading), then close the tab — so you don't have to
 // visit each channel by hand. Runs one at a time.
-const SCAN_CONCURRENCY = 12; // scan this many channels at once
-const SCAN_MAX_ATTEMPTS = 5;  // retry a channel until BOTH 7d and 30d are captured
+const SCAN_CONCURRENCY = 6;  // scan this many channels at once (fewer hidden tabs = vidIQ paints reliably)
+const SCAN_MAX_ATTEMPTS = 3;  // retry a channel until BOTH 7d and 30d are captured
 let scanQueue = [], scanning = false, scanTotalUnique = 0, scanCompleted = 0, scanCancelled = false;
 let scanAttempts = {};
 function scanChannel(id) { scanMany([id]); }
