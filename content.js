@@ -1017,46 +1017,37 @@
     for (const r of roots) out += vqWalkText(r) + " ";
     return out;
   }
-  // Find a clickable leaf (incl. inside open shadow roots) whose text === label.
-  // Find elements (incl. inside open shadow roots) whose trimmed text === label.
-  // We don't require a childless leaf — vidIQ wraps labels with icon siblings
-  // (e.g. <button><svg/>30D</button>), so we match by textContent and then pick
-  // the most specific (fewest descendants) candidate when clicking.
-  function vqDeepFind(label) {
-    const res = [];
-    const walk = (node) => {
-      if (!node || node.nodeType !== 1) return;
-      if ((node.textContent || "").trim() === label) res.push(node);
-      if (node.shadowRoot) for (const c of node.shadowRoot.children) walk(c);
-      for (const c of node.children) walk(c);
-    };
-    for (const c of document.body.children) walk(c);
-    return res;
+  // ---- vidIQ "Channel stats" popup ------------------------------------------
+  // vidIQ renders in the LIGHT DOM under elements whose class contains "vidiq".
+  // The popup has 3 sections in order — "Views gained", "Subscribers gained",
+  // "Videos published" — each with its OWN 7D/30D/3M/6M/1Y range toggles and a
+  // single accent-coloured "+N" value reflecting the selected range. There are
+  // NO "(7 days)"/"(30 days)" labels and no "Total views". So we drive the real
+  // toggles: because Views-gained renders FIRST, the first toggle and the first
+  // accent number in the popup are its own — no fragile container climbing, and
+  // a native scoped query (not a whole-page walk, which froze the scan tab).
+  const VQ_NUM_RE = /^[+\-−]?[\d.,]+\s*[KkMmBb]?$/;
+  function vqLeaf(label) {
+    for (const e of document.querySelectorAll('[class*="vidiq" i] *')) {
+      if (e.children.length === 0 && (e.textContent || "").trim() === label) return e;
+    }
+    return null;
   }
   function vqClickLabel(label) {
-    const els = vqDeepFind(label);
-    if (!els.length) return false;
-    els.sort((a, b) => a.getElementsByTagName("*").length - b.getElementsByTagName("*").length);
-    const el = els[0];
-    (el.closest("button,[role=button],[role=tab],a,[tabindex]") || el).click();
+    const el = vqLeaf(label);
+    if (!el) return false;
+    (el.closest("button,[role=button],[role=tab],a,[tabindex],[class*='cursor-pointer']") || el).click();
     return true;
   }
-  function vqClick30D() { return vqClickLabel("30D"); }
   function vqOpenStats() { return vqClickLabel("View channel stats"); }
-  // Is the 30D timeframe the currently-selected one? (lets us trust the chart
-  // readout even when the 30-day number happens to equal the 7-day number, or
-  // when vidIQ's chart already defaults to 30D).
-  function vq30Active() {
-    for (const el of vqDeepFind("30D")) {
-      const btn = el.closest("button,[role=button],[role=tab],[aria-selected],[aria-pressed]") || el;
-      if (!btn.getAttribute) continue;
-      const sel = btn.getAttribute("aria-selected") || btn.getAttribute("aria-pressed") || btn.getAttribute("aria-current");
-      if (sel === "true") return true;
-      const cls = btn.getAttribute("class") || "";
-      if (/(^|[\s_-])(active|selected|current|on)([\s_-]|$)/i.test(cls)) return true;
-    }
-    return false;
+  function vqClickTF(label) { return vqClickLabel(label); } // first 7D/30D = Views-gained's
+  // First accent-styled number in the popup = the Views-gained value.
+  function vqValue() {
+    const e = [...document.querySelectorAll('[class*="vidiq" i] [class*="text-accent" i]')].find((x) => VQ_NUM_RE.test((x.textContent || "").trim()));
+    return e ? vqNum(e.textContent) : null;
   }
+  // The popup is open once its range toggles are present.
+  function vqPopupOpen() { return !!vqLeaf("7D") && !!vqLeaf("30D"); }
 
   function vqChannelId() {
     const meta = document.querySelector('meta[itemprop="identifier"], meta[itemprop="channelId"]');
@@ -1065,20 +1056,9 @@
     const m = canon && /\/channel\/(UC[\w-]{20,})/.exec(canon.href || "");
     return m ? m[1] : null;
   }
-  // The fixed "Views gained (7 days) +N" stat.
-  function vq7(text) {
+  // Passive-only: the inline "Quick channel stats" panel's "Views gained (7 days) +N".
+  function vq7Inline(text) {
     const m = /Views gained\s*\(7\s*days?\)[\s\S]{0,40}?([+\-−]?\s*[\d.,]+\s*[KkMmBb]?)/i.exec(text);
-    return m ? vqNum(m[1]) : null;
-  }
-  // A "(30 days)"-labelled stat, if vidIQ shows one outright (no chart flip needed).
-  function vq30Labeled(text) {
-    const m = /Views gained\s*\(30\s*days?\)[\s\S]{0,40}?([+\-−]?\s*[\d.,]+\s*[KkMmBb]?)/i.exec(text);
-    return m ? vqNum(m[1]) : null;
-  }
-  // The chart's "Views gained +N" readout (reflects the selected timeframe). The
-  // \s+ right after "gained" excludes the "(7 days)" stat (which has "(" next).
-  function vqChart(text) {
-    const m = /Views gained\s+([+\-−]?\s*[\d.,]+\s*[KkMmBb]?)/i.exec(text);
     return m ? vqNum(m[1]) : null;
   }
   function vqMaybeSave(id, patch) {
@@ -1109,44 +1089,26 @@
       chrome.storage.local.set({ vidiqHistory: hist });
     });
   }
-  // Passive capture while you browse a channel (NOT in scan tabs — they drive
-  // their own capture and must not be fought by this timer).
+  // Passive capture while you browse a channel (NOT in scan tabs). Best-effort,
+  // read-only: grabs the inline 7-day stat if vidIQ's quick panel shows it. The
+  // 30-day needs the popup's range toggles, which the scan path drives.
   function vqTick() {
     const id = vqChannelId();
-    if (!id) return; // not on a channel page
-    const txt = vqScopedText();
-    if (!txt) return;
-    const v7 = vq7(txt);
+    if (!id) return;
+    const v7 = vq7Inline(vqScopedText());
     if (v7 != null) vqMaybeSave(id, { v7 });
-    // 30-day: only when the channel-stats popup is open
-    const popup = /Total views/i.test(txt) && /Views gained/i.test(txt);
-    if (popup && (vqLastModal.id !== id || Date.now() - vqLastModal.t > 5000)) {
-      vqLastModal = { id, t: Date.now() };
-      const labeled = vq30Labeled(txt);
-      if (labeled != null) { vqMaybeSave(id, { v30: labeled }); return; }
-      const baseline = vqChart(txt); // current (default, usually 7-day) readout
-      vqClick30D();
-      setTimeout(() => {
-        const t2 = vqScopedText();
-        const lab2 = vq30Labeled(t2);
-        if (lab2 != null) { vqMaybeSave(id, { v30: lab2 }); return; }
-        const c = vqChart(t2);
-        // Only trust the chart as 30-day if it actually changed from the default,
-        // or the 30D tab is confirmed selected — never store the 7-day value as v30.
-        if (c != null && (c !== baseline || vq30Active())) vqMaybeSave(id, { v30: c });
-      }, 1000);
-    }
   }
   if (!VQ_SCAN) setInterval(vqTick, 1500);
 
-  // Scan mode: the board opens the channel in a hidden tab with #ssscan so it can
-  // pull the numbers without you browsing there. We open vidIQ's "View channel
-  // stats" popup ONCE (never re-clicking the toggle while it's open), read the
-  // 7-day stat, flip the chart to 30D, read the 30-day value, then close the tab.
+  // Scan mode: the board opens the channel in a hidden tab with #ssscan. We open
+  // vidIQ's "View channel stats" popup ONCE, then — in its "Views gained" section
+  // — click 7D and read the value, then click 30D and read the value, exactly how
+  // a person would. Each value is captured once it CHANGES from the prior range
+  // (so we never store the wrong timeframe), with a settle-timeout fallback.
   if (VQ_SCAN) {
     const startedAt = Date.now();
-    let got7 = false, got30 = false, clickedOpen = false, everOpen = false;
-    let d30Clicked = false, d30Reclicks = 0, d30Since = 0, d30Baseline = null, done = false;
+    let got7 = false, got30 = false, clickedOpen = false, done = false;
+    let phase = "open", tStep = 0, clickTries = 0, missTicks = 0, base = null;
     function finishScan(reason) {
       if (done) return; done = true;
       clearInterval(iv);
@@ -1160,43 +1122,46 @@
       const id = vqChannelId();
       const el = Date.now() - startedAt;
       if (!id) { if (el > 32000) finishScan("no-channel"); return; }
-      const txt = vqWalkText(document.body);
-      const popupOpen = /Total views/i.test(txt) && /Views gained/i.test(txt);
+      const open = vqPopupOpen();
 
-      // 7-day can come from the inline panel or the popup — grab it whenever present.
-      if (!got7) { const v = vq7(txt); if (v != null) { got7 = true; vqMaybeSave(id, { v7: v }); } }
-
-      if (!popupOpen) {
-        // The "View channel stats" control is a TOGGLE, so we click it AT MOST ONCE
-        // (the first tick it exists). If it opened but hasn't painted yet, everOpen
-        // is still false but we must NOT click again (that would close it) — we wait.
-        if (everOpen) { if (el > 30000) return finishScan("lost-popup"); return; }
+      if (phase === "open") {
+        if (open) { phase = "click7"; return; }                 // popup is open
         if (el > 26000) return finishScan(clickedOpen ? "no-paint" : "no-button");
-        if (!clickedOpen) { if (vqOpenStats()) clickedOpen = true; }
+        if (!clickedOpen) { if (vqOpenStats()) clickedOpen = true; } // open it once
         return;
       }
-      everOpen = true;                                   // popup is open: never click the open-toggle again
+      if (!open) {                                              // popup vanished after opening
+        if (++missTicks > 25) return finishScan(got7 || got30 ? "partial" : "lost-popup");
+        return;
+      }
+      missTicks = 0;
 
-      if (!got30) {
-        const labeled = vq30Labeled(txt);
-        if (labeled != null) { got30 = true; vqMaybeSave(id, { v30: labeled }); }
-        else {
-          const cur = vqChart(txt);
-          if (d30Baseline === null && cur != null) d30Baseline = cur; // default (usually 7-day) readout
-          if (!d30Clicked) {
-            if (vqClick30D()) { d30Clicked = true; d30Since = el; } // 30D is a radio: one click is enough
-          } else if (cur != null && d30Baseline != null && cur !== d30Baseline) {
-            got30 = true; vqMaybeSave(id, { v30: cur });            // readout changed → it's the 30-day value
-          } else if (cur != null && el - d30Since > 1200 && vq30Active()) {
-            got30 = true; vqMaybeSave(id, { v30: cur });            // 30D confirmed selected & settled (handles 7d==30d / default-30D)
-          } else if (el - d30Since > 1600 && d30Reclicks < 2) {
-            if (vqClick30D()) { d30Reclicks++; d30Since = el; }     // click didn't register → retry (radio = safe)
-          }
-        }
+      if (phase === "click7") {
+        base = vqValue();                                       // value before selecting 7D
+        if (vqClickTF("7D")) { tStep = el; clickTries = 0; phase = "read7"; }
+        else if (++clickTries > 6) { clickTries = 0; phase = "click30"; } // no 7D button → skip
+        return;
+      }
+      if (phase === "read7") {
+        const v = vqValue();
+        if (v != null && (v !== base || el - tStep > 2500)) { got7 = true; vqMaybeSave(id, { v7: v }); base = v; phase = "click30"; }
+        else if (el - tStep > 4500) { base = v; phase = "click30"; } // unreadable → move on
+        return;
+      }
+      if (phase === "click30") {
+        if (vqClickTF("30D")) { tStep = el; clickTries = 0; phase = "read30"; }
+        else if (++clickTries > 6) { clickTries = 0; phase = "done"; } // no 30D button → done
+        return;
+      }
+      if (phase === "read30") {
+        const v = vqValue();
+        if (v != null && (v !== base || el - tStep > 2500)) { got30 = true; vqMaybeSave(id, { v30: v }); phase = "done"; }
+        else if (el - tStep > 4500) phase = "done";
+        return;
       }
 
-      if (got7 && got30) return finishScan("ok");
-      if (el > 30000) return finishScan(got7 || got30 ? "partial" : "timeout");
+      if (phase === "done" || (got7 && got30)) return finishScan("ok");
+      if (el > 32000) return finishScan(got7 || got30 ? "partial" : "timeout");
     }, 300);
   }
 
