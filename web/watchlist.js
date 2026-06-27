@@ -3071,8 +3071,8 @@ document.addEventListener("click", (e) => {
 const GH_REPO = "lman80/shorts-scout-chrome-extension";
 const SF_BACKEND = "https://superfeedback.ashton-mcp-worker.workers.dev";
 const APP_VERSION = (() => {
-  try { return (IS_EXTENSION && chrome.runtime && chrome.runtime.getManifest) ? chrome.runtime.getManifest().version : "1.1.1"; }
-  catch (e) { return "1.1.1"; }
+  try { return (IS_EXTENSION && chrome.runtime && chrome.runtime.getManifest) ? chrome.runtime.getManifest().version : "1.1.2"; }
+  catch (e) { return "1.1.2"; }
 })();
 
 function closeModalEl(el) { if (el) el.remove(); }
@@ -3143,7 +3143,39 @@ function openFeedback() {
 
 function verParts(v) { return String(v || "").replace(/^v/i, "").split(".").map((n) => parseInt(n, 10) || 0); }
 function isNewer(a, b) { const A = verParts(a), B = verParts(b); for (let i = 0; i < Math.max(A.length, B.length); i++) { const x = A[i] || 0, y = B[i] || 0; if (x > y) return true; if (x < y) return false; } return false; }
-function checkUpdates() {
+function ghLatest() {
+  return fetch("https://api.github.com/repos/" + GH_REPO + "/releases/latest", { headers: { Accept: "application/vnd.github+json" } })
+    .then((r) => { if (r.status === 404) return null; if (!r.ok) throw new Error(String(r.status)); return r.json(); });
+}
+function relZipUrl(rel) {
+  const a = (rel.assets || []).find((x) => /\.zip$/i.test(x.name || ""));
+  return (a && a.browser_download_url) || rel.html_url;
+}
+function restartExtension() {
+  try { if (IS_EXTENSION && chrome.runtime && chrome.runtime.reload) { chrome.runtime.reload(); return; } } catch (e) {}
+  location.reload();
+}
+function renderUpdateBody(bodyEl, rel) {
+  if (!rel) { bodyEl.innerHTML = `<p>No releases published yet. You're on <b>v${esc(APP_VERSION)}</b>.</p>`; return; }
+  const latest = rel.tag_name || rel.name || "";
+  const notes = (rel.body || "").trim();
+  if (!isNewer(latest, APP_VERSION)) { bodyEl.innerHTML = `<p class="up-ok">✓ You're up to date — <b>v${esc(APP_VERSION)}</b> is the latest.</p>`; return; }
+  const dl = relZipUrl(rel);
+  bodyEl.innerHTML = `<p class="up-new">⬆ Update available: <b>${esc(latest)}</b> &nbsp;<span class="up-dim">(you have v${esc(APP_VERSION)})</span></p>
+    ${notes ? `<div class="up-notes">${esc(notes).slice(0, 700)}</div>` : ""}
+    ${IS_EXTENSION ? `
+      <ol class="up-howto">
+        <li><a class="up-getbtn" href="${esc(dl)}" target="_blank" rel="noopener" download>⬇ Download the update</a></li>
+        <li>Unzip it, then drag the files into your Shorts&nbsp;Scout folder — replace the old ones when asked.</li>
+        <li>Come back here and click <b>Restart</b> (no need to visit chrome://extensions).</li>
+      </ol>
+      <button class="up-restart" id="upRestart">↻ Restart Shorts Scout</button>`
+    : `<a class="up-getbtn" href="${esc(dl)}" target="_blank" rel="noopener">Open the latest version</a>
+       <div class="up-steps">The website updates itself — just refresh this page.</div>`}`;
+  const rb = bodyEl.querySelector("#upRestart");
+  if (rb) rb.onclick = restartExtension;
+}
+function openUpdateModal() {
   const old = document.getElementById("upModal"); if (old) old.remove();
   const modal = document.createElement("div");
   modal.id = "upModal"; modal.className = "sf-modal";
@@ -3152,24 +3184,20 @@ function checkUpdates() {
   modal.querySelector(".sf-x").onclick = () => modal.remove();
   modal.onclick = (e) => { if (e.target === modal) modal.remove(); };
   const bodyEl = modal.querySelector(".up-body");
-  fetch("https://api.github.com/repos/" + GH_REPO + "/releases/latest", { headers: { Accept: "application/vnd.github+json" } })
-    .then((r) => { if (r.status === 404) return null; if (!r.ok) throw new Error(String(r.status)); return r.json(); })
-    .then((rel) => {
-      if (!rel) { bodyEl.innerHTML = `<p>No releases published yet. You're on <b>v${esc(APP_VERSION)}</b>.</p>`; return; }
-      const latest = rel.tag_name || rel.name || "";
-      const notes = (rel.body || "").trim();
-      if (isNewer(latest, APP_VERSION)) {
-        bodyEl.innerHTML = `<p class="up-new">⬆ Update available: <b>${esc(latest)}</b> &nbsp;<span class="up-dim">(you have v${esc(APP_VERSION)})</span></p>
-          ${notes ? `<div class="up-notes">${esc(notes).slice(0, 700)}</div>` : ""}
-          <a class="up-getbtn" href="${esc(rel.html_url)}" target="_blank" rel="noopener">⬇ Download the update</a>
-          <div class="up-steps">${IS_EXTENSION
-            ? "Then: unzip it, go to <b>chrome://extensions</b>, and click the ↻ on Shorts Scout (or remove it and “Load unpacked” the new folder)."
-            : "The website updates itself — just refresh this page."}</div>`;
-      } else {
-        bodyEl.innerHTML = `<p class="up-ok">✓ You're up to date — <b>v${esc(APP_VERSION)}</b> is the latest.</p>`;
-      }
-    })
+  ghLatest().then((rel) => renderUpdateBody(bodyEl, rel))
     .catch(() => { bodyEl.innerHTML = `<p>Couldn't check right now (network or GitHub rate limit). You're on <b>v${esc(APP_VERSION)}</b>.</p>`; });
+}
+function checkUpdates() { openUpdateModal(); }      // manual (More menu): always opens the dialog
+function autoUpdateCheck() {                         // on load: silently nudge only if there's a newer version
+  ghLatest().then((rel) => {
+    if (!rel) return;
+    const latest = rel.tag_name || rel.name || "";
+    const banner = document.getElementById("updateBanner");
+    if (banner && isNewer(latest, APP_VERSION)) {
+      const v = banner.querySelector(".upb-ver"); if (v) v.textContent = latest;
+      banner.hidden = false;
+    }
+  }).catch(() => {});
 }
 
 // ---- API key entry (the toolbar icon now opens this board, so the key is set here) ----
@@ -3207,7 +3235,9 @@ function promptApiKey() {
   const mv = document.getElementById("menuVersion"); if (mv) mv.textContent = "Shorts Scout · v" + APP_VERSION;
   const apiBtn = document.getElementById("apiKeyBtn"); if (apiBtn) apiBtn.onclick = promptApiKey;
   const apiBannerBtn = document.getElementById("apiBannerBtn"); if (apiBannerBtn) apiBannerBtn.onclick = promptApiKey;
+  const updBannerBtn = document.getElementById("updateBannerBtn"); if (updBannerBtn) updBannerBtn.onclick = openUpdateModal;
   refreshApiBanner();
+  autoUpdateCheck();
 })();
 
 load();

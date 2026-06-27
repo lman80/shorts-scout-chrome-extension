@@ -906,6 +906,12 @@
       .api-text span { font-size: 12.5px; color: var(--dim); }
       .api-btn { flex: none; background: var(--accent, #4f8cff); border: 0; color: #fff; border-radius: 10px; padding: 10px 16px; font-size: 13.5px; font-weight: 700; cursor: pointer; }
       .api-btn:hover { filter: brightness(1.08); }
+      .update-banner { background: linear-gradient(90deg, rgba(70,209,127,0.16), rgba(58,168,106,0.10)); }
+      .update-banner .api-btn { background: #46d17f; color: #06210f; }
+      .up-howto { margin: 12px 0 4px; padding-left: 20px; font-size: 13px; color: var(--dim); line-height: 1.7; }
+      .up-howto li { margin-bottom: 4px; }
+      .up-restart { width: 100%; margin-top: 12px; background: #46d17f; border: 0; color: #06210f; border-radius: 10px; padding: 11px; font-size: 14px; font-weight: 800; cursor: pointer; }
+      .up-restart:hover { filter: brightness(1.06); }
     </style>
   </head>
   <body>
@@ -1024,6 +1030,15 @@
           <div class="menu-version" id="menuVersion"></div>
         </div>
       </div>
+    </div>
+
+    <div id="updateBanner" class="api-banner update-banner" hidden>
+      <span class="api-emoji">⬆️</span>
+      <div class="api-text">
+        <b>A new version (<span class="upb-ver"></span>) of Shorts Scout is available.</b>
+        <span>One-click download, then restart — no chrome://extensions needed.</span>
+      </div>
+      <button class="api-btn" id="updateBannerBtn">Update now</button>
     </div>
 
     <div id="apiBanner" class="api-banner" hidden>

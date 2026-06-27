@@ -1,7 +1,7 @@
 {
   "manifest_version": 3,
   "name": "Shorts Scout — YouTube Shorts Research",
-  "version": "1.1.1",
+  "version": "1.1.2",
   "description": "While watching youtube.com/shorts, see the current short's total views and one-click scan the channel's total views, video count, and how many videos are over 1M / 10M.",
   "permissions": ["storage", "unlimitedStorage", "alarms", "tabs"],
   "host_permissions": ["https://www.googleapis.com/*", "https://firestore.googleapis.com/*", "https://api.github.com/*", "https://superfeedback.ashton-mcp-worker.workers.dev/*"],

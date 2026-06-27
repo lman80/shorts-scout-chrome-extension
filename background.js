@@ -357,3 +357,25 @@ chrome.action.onClicked.addListener(() => {
     }
   });
 });
+
+// ---- update badge: flag the toolbar icon when a newer GitHub release exists ----
+async function checkUpdateBadge() {
+  try {
+    const res = await fetch("https://api.github.com/repos/lman80/shorts-scout-chrome-extension/releases/latest", {
+      headers: { Accept: "application/vnd.github+json" },
+    });
+    if (!res.ok) return;
+    const rel = await res.json();
+    const L = String(rel.tag_name || "").replace(/^v/i, "").split(".").map((n) => parseInt(n, 10) || 0);
+    const C = chrome.runtime.getManifest().version.split(".").map((n) => parseInt(n, 10) || 0);
+    let newer = false;
+    for (let i = 0; i < Math.max(L.length, C.length); i++) { const a = L[i] || 0, b = C[i] || 0; if (a > b) { newer = true; break; } if (a < b) break; }
+    chrome.action.setBadgeText({ text: newer ? "↑" : "" });
+    if (newer) chrome.action.setBadgeBackgroundColor({ color: "#46d17f" });
+  } catch (e) { /* offline / rate-limited — ignore */ }
+}
+chrome.alarms.create("updateBadge", { periodInMinutes: 720 }); // twice a day
+chrome.alarms.onAlarm.addListener((a) => { if (a.name === "updateBadge") checkUpdateBadge(); });
+if (chrome.runtime.onStartup) chrome.runtime.onStartup.addListener(checkUpdateBadge);
+if (chrome.runtime.onInstalled) chrome.runtime.onInstalled.addListener(checkUpdateBadge);
+checkUpdateBadge();
