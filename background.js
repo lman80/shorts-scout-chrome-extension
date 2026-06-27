@@ -248,6 +248,9 @@ async function fetchRecentUploads(channel, apiKey, maxItems = 50) {
 }
 
 chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
+  if (!msg) return;
+  // Cloud-sync messages are handled by cloud-sync.js — don't touch them here.
+  if (msg.type === "CLOUD_SYNC" || msg.type === "SWITCH_BOARD" || msg.type === "SAVE_PROFILES") return;
   // Open a URL in a new tab (background by default; foreground if msg.active).
   if (msg.type === "OPEN_TAB") {
     chrome.tabs.create({ url: msg.url, active: !!msg.active });

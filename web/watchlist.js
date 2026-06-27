@@ -23,7 +23,7 @@ const ATTR_DIMS = [
 // Stable color per niche (by index) for the column dot.
 const NICHE_COLORS = ["#ff0033", "#4aa8ff", "#ffcb47", "#4ade80", "#c084fc", "#ff8a3d", "#2dd4bf", "#f472b6", "#a3e635", "#60a5fa"];
 
-const state = { watchlist: [], niches: [], nicheParents: {}, tags: [], madeBy: [], madeFor: [], languages: [], savedVideos: [], snapshots: [], vidiqStats: {}, vidiqHistory: {}, topOrder: [], mediaItems: [], productions: [], sort: "avg", view: "board", search: "", filterTop: false };
+const state = { watchlist: [], niches: [], nicheParents: {}, tags: [], madeBy: [], madeFor: [], languages: [], savedVideos: [], snapshots: [], vidiqStats: {}, vidiqHistory: {}, topOrder: [], mediaItems: [], productions: [], activeBoard: "shared", boardProfiles: [{ id: "shared", name: "Team" }], sort: "avg", view: "board", search: "", filterTop: false };
 const collapsedSub = new Set(); // collapsed "parent>child" sub-niche sections on the board
 let ignoreNextChange = false;
 const recentCache = {}; // channelId -> { loading } | { recent:[...] } | { error }
@@ -38,7 +38,9 @@ function load() {
   // Ask the background worker to pull the latest from the cloud right away
   // (the periodic alarm also does this every minute). Best-effort.
   try { chrome.runtime.sendMessage({ type: "CLOUD_SYNC" }, () => void chrome.runtime.lastError); } catch (e) {}
-  chrome.storage.local.get(["watchlist", "niches", "nicheParents", "boardPrefs", "savedVideos", "snapshots", "tags", "madeBy", "madeFor", "languages", "vidiqStats", "vidiqHistory", "topOrder", "mediaItems", "productions"], (d) => {
+  chrome.storage.local.get(["watchlist", "niches", "nicheParents", "boardPrefs", "savedVideos", "snapshots", "tags", "madeBy", "madeFor", "languages", "vidiqStats", "vidiqHistory", "topOrder", "mediaItems", "productions", "activeBoard", "boardProfiles"], (d) => {
+    state.activeBoard = d.activeBoard || "shared";
+    state.boardProfiles = (d.boardProfiles && d.boardProfiles.length) ? d.boardProfiles : [{ id: "shared", name: "Team" }];
     state.watchlist = (d.watchlist || []).map(normalize);
     state.vidiqStats = d.vidiqStats || {};
     state.vidiqHistory = d.vidiqHistory || {};
@@ -175,6 +177,8 @@ chrome.storage.onChanged.addListener((changes, area) => {
   if (changes.topOrder) state.topOrder = changes.topOrder.newValue || [];
   if (changes.mediaItems) state.mediaItems = changes.mediaItems.newValue || [];
   if (changes.productions) state.productions = (changes.productions.newValue || []).map(normalizeProduction);
+  if (changes.boardProfiles) { state.boardProfiles = changes.boardProfiles.newValue || state.boardProfiles; renderUserBar(); }
+  if (changes.activeBoard) { state.activeBoard = changes.activeBoard.newValue || "shared"; renderUserBar(); }
   seedNichesFromChannels();
   render();
 });
@@ -2935,6 +2939,87 @@ function syncControls() {
   document.getElementById("sort").value = state.sort;
   const vs = document.getElementById("viewsel");
   if (vs) vs.value = state.view;
+  renderUserBar();
+}
+
+// ---- users / boards switcher ------------------------------------------------
+function activeProfile() {
+  return (state.boardProfiles || []).find((p) => p.id === state.activeBoard) || { id: "shared", name: "Team" };
+}
+function renderUserBar() {
+  const nameEl = document.getElementById("userName");
+  if (nameEl) nameEl.textContent = activeProfile().name;
+  const menu = document.getElementById("userMenu");
+  if (!menu) return;
+  const rows = (state.boardProfiles || []).map((p) => {
+    const on = p.id === state.activeBoard;
+    const team = p.id === "shared";
+    return `<div class="um-row ${on ? "on" : ""}" data-id="${esc(p.id)}">
+        <button class="um-pick" data-id="${esc(p.id)}">${on ? "● " : "○ "}${esc(p.name)}${team ? " <span class=\"um-team\">team</span>" : ""}</button>
+        ${team ? "" : `<button class="um-edit" data-id="${esc(p.id)}" title="Rename">✎</button><button class="um-del" data-id="${esc(p.id)}" title="Delete">✕</button>`}
+      </div>`;
+  }).join("");
+  menu.innerHTML = rows + `<button class="um-add" id="umAdd">＋ New user</button>`;
+  menu.querySelectorAll(".um-pick").forEach((b) => (b.onclick = () => switchBoard(b.dataset.id)));
+  menu.querySelectorAll(".um-edit").forEach((b) => (b.onclick = (e) => { e.stopPropagation(); renameUser(b.dataset.id); }));
+  menu.querySelectorAll(".um-del").forEach((b) => (b.onclick = (e) => { e.stopPropagation(); deleteUser(b.dataset.id); }));
+  const add = document.getElementById("umAdd");
+  if (add) add.onclick = addUser;
+}
+function toggleUserMenu(force) {
+  const menu = document.getElementById("userMenu");
+  if (!menu) return;
+  const show = force != null ? force : menu.hasAttribute("hidden");
+  if (show) { renderUserBar(); menu.removeAttribute("hidden"); } else menu.setAttribute("hidden", "");
+}
+function slugify(s) { return (String(s).toLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/^-|-$/g, "") || "board").slice(0, 24); }
+function saveProfiles(profiles, cb) {
+  state.boardProfiles = profiles;
+  try { chrome.runtime.sendMessage({ type: "SAVE_PROFILES", profiles }, () => { void chrome.runtime.lastError; cb && cb(); }); }
+  catch (e) { cb && cb(); }
+}
+function showSwitchOverlay(name) {
+  let ov = document.getElementById("switchOverlay");
+  if (!ov) { ov = document.createElement("div"); ov.id = "switchOverlay"; document.body.appendChild(ov); }
+  ov.innerHTML = `<div class="so-box"><div class="so-spin"></div><div>Switching to <b>${esc(name)}</b>…</div></div>`;
+  ov.style.display = "grid";
+}
+function switchBoard(id) {
+  toggleUserMenu(false);
+  if (id === state.activeBoard) return;
+  const p = (state.boardProfiles || []).find((x) => x.id === id);
+  showSwitchOverlay(p ? p.name : id);
+  try {
+    chrome.runtime.sendMessage({ type: "SWITCH_BOARD", to: id }, () => {
+      void chrome.runtime.lastError;
+      setTimeout(() => location.reload(), 300);
+    });
+  } catch (e) { setTimeout(() => location.reload(), 300); }
+}
+function addUser() {
+  const name = (prompt("Name this user / board (e.g. your teammate's name):") || "").trim();
+  if (!name) return;
+  const id = slugify(name) + "-" + Math.random().toString(36).slice(2, 6);
+  const profiles = (state.boardProfiles || []).concat([{ id, name }]);
+  saveProfiles(profiles, () => switchBoard(id)); // jump straight into the new (empty) board
+}
+function renameUser(id) {
+  const p = (state.boardProfiles || []).find((x) => x.id === id);
+  if (!p) return;
+  const name = (prompt("Rename this user:", p.name) || "").trim();
+  if (!name) return;
+  const profiles = state.boardProfiles.map((x) => (x.id === id ? { id: x.id, name } : x));
+  saveProfiles(profiles, () => { renderUserBar(); });
+}
+function deleteUser(id) {
+  if (id === "shared") { alert("The Team board can't be deleted."); return; }
+  const p = (state.boardProfiles || []).find((x) => x.id === id);
+  if (!confirm("Remove the user “" + (p ? p.name : id) + "” from the switcher? (Its saved channels stay in the cloud and can be re-added.)")) return;
+  const profiles = state.boardProfiles.filter((x) => x.id !== id);
+  saveProfiles(profiles, () => {
+    if (state.activeBoard === id) switchBoard("shared");
+    else renderUserBar();
+  });
 }
 
 document.getElementById("sort").onchange = (e) => { state.sort = e.target.value; save(); render(); };
@@ -2946,6 +3031,9 @@ const TOP_SHORT_TODAY_URL =
   "https://www.viewstats.com/top-list?filterBy=views&interval=ms_yesterday&madeForKids=true&movies=true&musicChannels=true&tab=videos&videoType=shorts";
 const topShortBtn = document.getElementById("topShortBtn");
 if (topShortBtn) topShortBtn.onclick = () => window.open(TOP_SHORT_TODAY_URL, "_blank", "noopener");
+const userBtn = document.getElementById("userBtn");
+if (userBtn) userBtn.onclick = (e) => { e.stopPropagation(); toggleUserMenu(); };
+document.addEventListener("click", (e) => { const ub = document.getElementById("userbar"); if (ub && !ub.contains(e.target)) toggleUserMenu(false); });
 document.getElementById("refresh").onclick = doRefresh;
 const scanAllBtn = document.getElementById("scanAll");
 if (scanAllBtn) {

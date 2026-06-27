@@ -21,7 +21,13 @@
   }
   firebase.initializeApp(window.FIREBASE_CONFIG);
   const db = firebase.firestore();
-  const DOC = db.collection("boards").doc("shared"); // the one shared open board
+  // MULTI-BOARD: the active board ("user") is chosen per-device. "shared" is the
+  // Team board; personal boards live at boards/<id>. The list of boards lives in
+  // a registry doc so every teammate sees the same switcher.
+  function getActiveBoard() { try { return JSON.parse(localStorage.getItem("ss_activeBoard")) || "shared"; } catch (e) { return "shared"; } }
+  const ACTIVE = getActiveBoard();
+  const DOC = db.collection("boards").doc(ACTIVE);   // the board we're viewing
+  const REG = db.collection("boards").doc("__index__"); // registry of all boards
 
   let cloudData = {}; // mirrors chrome.storage.local
   const listeners = [];
@@ -32,6 +38,8 @@
   //  - notebookImages: too big for one Firestore doc (1MB cap)
   //  - apiKey: secret-ish; don't expose it in world-readable data
   const LOCAL_KEYS = new Set(["notebookImages", "apiKey"]);
+  // Keys that must NEVER be written into a board document (per-device or registry).
+  const NO_BOARD = new Set(["notebookImages", "apiKey", "boardProfiles", "activeBoard", "_cloudRev", "_rev"]);
   function loadLocalKeys() {
     LOCAL_KEYS.forEach((k) => {
       try { const v = localStorage.getItem("ss_" + k); if (v != null) cloudData[k] = JSON.parse(v); } catch (e) {}
@@ -87,7 +95,7 @@
     setStatus("Saving…");
     writeTimer = setTimeout(async () => {
       const payload = {};
-      Object.keys(cloudData).forEach((k) => { if (!LOCAL_KEYS.has(k)) payload[k] = cloudData[k]; });
+      Object.keys(cloudData).forEach((k) => { if (!NO_BOARD.has(k)) payload[k] = cloudData[k]; });
       payload._rev = Date.now(); // lets the extension detect this change and pull it
       try {
         await DOC.set(payload, { merge: true });
@@ -177,6 +185,21 @@
   async function handleMsg(msg) {
     if (!msg) return { ok: true };
     if (msg.type === "OPEN_TAB") { window.open(msg.url, "_blank"); return { ok: true }; }
+    if (msg.type === "CLOUD_SYNC") { return { ok: true }; } // website is already live via onSnapshot
+    if (msg.type === "SWITCH_BOARD") {
+      // Flush the CURRENT board, remember the chosen one, then the page reloads onto it.
+      const payload = {};
+      Object.keys(cloudData).forEach((k) => { if (!NO_BOARD.has(k)) payload[k] = cloudData[k]; });
+      payload._rev = Date.now();
+      try { await DOC.set(payload, { merge: true }); } catch (e) { console.error("flush failed", e); }
+      localStorage.setItem("ss_activeBoard", JSON.stringify(msg.to));
+      return { ok: true };
+    }
+    if (msg.type === "SAVE_PROFILES") {
+      cloudData.boardProfiles = msg.profiles;
+      try { await REG.set({ profiles: msg.profiles, _rev: Date.now() }, { merge: true }); } catch (e) { console.error("profiles save failed", e); }
+      return { ok: true };
+    }
     if (!ytKey()) return { ok: false, error: "NO_API_KEY" };
     if (msg.type === "RECENT") return await ytRecent(msg.channelId, Math.min(200, Math.max(1, msg.maxItems || 50)));
     if (msg.type === "REFRESH_CHANNELS") return await ytRefresh(msg.ids || []);
@@ -255,6 +278,18 @@
   document.addEventListener("DOMContentLoaded", () => {
     showGate(`<h1>Shorts Scout</h1><p>Loading your board…</p>`);
     loadLocalKeys();
+    cloudData.activeBoard = ACTIVE; // which board this device is viewing
+    // Keep the list of boards (users) in sync from the shared registry doc.
+    REG.onSnapshot((snap) => {
+      const d = snap.data();
+      if (!d || !Array.isArray(d.profiles) || !d.profiles.length) {
+        const seed = [{ id: "shared", name: "Team" }];
+        applyRemote({ boardProfiles: seed });
+        REG.set({ profiles: seed, _rev: Date.now() }, { merge: true }).catch(() => {});
+        return;
+      }
+      applyRemote({ boardProfiles: d.profiles });
+    }, (err) => console.warn("registry", err));
     DOC.onSnapshot((snap) => {
       if (snap.metadata.hasPendingWrites) return; // ignore our own writes
       const data = snap.data() || {};
