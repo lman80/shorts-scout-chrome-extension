@@ -865,6 +865,38 @@
       #switchOverlay .so-box { display: flex; flex-direction: column; align-items: center; gap: 14px; color: var(--text); font-size: 15px; }
       #switchOverlay .so-spin { width: 36px; height: 36px; border: 3px solid var(--line2); border-top-color: var(--accent, #4f8cff); border-radius: 50%; animation: so-spin 0.8s linear infinite; }
       @keyframes so-spin { to { transform: rotate(360deg); } }
+
+      /* ---- feedback + updates modals ---- */
+      .menu-version { font-size: 10.5px; color: var(--muted); text-align: center; padding: 8px 6px 4px; border-top: 1px solid var(--line); margin-top: 4px; }
+      .sf-modal { position: fixed; inset: 0; background: rgba(8,8,12,0.66); z-index: 9998; display: grid; place-items: center; padding: 20px; }
+      .sf-box { width: 460px; max-width: 94vw; background: var(--surface); border: 1px solid var(--line2); border-radius: 16px; box-shadow: var(--shadow); padding: 18px; }
+      .sf-head { display: flex; align-items: center; justify-content: space-between; font-size: 17px; font-weight: 800; margin-bottom: 14px; }
+      .sf-x { background: none; border: 0; color: var(--muted); cursor: pointer; font-size: 15px; padding: 4px 7px; border-radius: 8px; }
+      .sf-x:hover { color: var(--text); background: var(--surface3); }
+      .sf-types { display: flex; gap: 8px; margin-bottom: 12px; }
+      .sf-type { flex: 1; background: var(--surface2); border: 1px solid var(--line2); color: var(--dim); border-radius: 10px; padding: 9px; font-size: 13px; font-weight: 700; cursor: pointer; }
+      .sf-type.on { background: var(--accent, #4f8cff); border-color: var(--accent, #4f8cff); color: #fff; }
+      .sf-msg { width: 100%; min-height: 120px; background: var(--bg); border: 1px solid var(--line2); color: var(--text); border-radius: 11px; padding: 11px 13px; font-family: inherit; font-size: 14px; line-height: 1.5; resize: vertical; box-sizing: border-box; }
+      .sf-attach { display: block; width: 100%; text-align: left; margin-top: 10px; background: var(--surface2); border: 1px dashed var(--line2); color: var(--dim); border-radius: 10px; padding: 9px 12px; font-size: 12.5px; font-weight: 600; cursor: pointer; }
+      .sf-attach:hover { color: var(--text); border-color: #46465a; }
+      .sf-thumb { margin-top: 10px; position: relative; display: inline-block; }
+      .sf-thumb img { max-height: 120px; max-width: 100%; border-radius: 10px; border: 1px solid var(--line2); display: block; }
+      .sf-imgx { position: absolute; top: 5px; right: 5px; width: 22px; height: 22px; border: 0; border-radius: 50%; background: rgba(0,0,0,0.7); color: #fff; cursor: pointer; font-size: 12px; }
+      .sf-foot { display: flex; align-items: center; gap: 12px; margin-top: 16px; }
+      .sf-status { flex: 1; font-size: 12.5px; color: var(--dim); }
+      .sf-status a { color: var(--accent, #4f8cff); }
+      .sf-send { background: var(--accent, #4f8cff); border: 0; color: #fff; border-radius: 10px; padding: 10px 22px; font-size: 14px; font-weight: 700; cursor: pointer; }
+      .sf-send:hover { filter: brightness(1.08); }
+      .sf-send:disabled { opacity: 0.6; cursor: default; }
+      .sf-note { font-size: 11px; color: var(--muted); margin-top: 12px; text-align: center; }
+      .up-body { font-size: 14px; line-height: 1.55; color: var(--dim); }
+      .up-body b { color: var(--text); }
+      .up-new { color: var(--text); font-size: 15px; font-weight: 700; }
+      .up-dim { color: var(--muted); font-weight: 500; font-size: 12.5px; }
+      .up-ok { color: #46d17f; font-size: 15px; font-weight: 700; }
+      .up-notes { background: var(--bg); border: 1px solid var(--line2); border-radius: 10px; padding: 11px 13px; margin: 12px 0; font-size: 12.5px; white-space: pre-wrap; max-height: 200px; overflow: auto; color: var(--dim); }
+      .up-getbtn { display: inline-block; background: var(--accent, #4f8cff); color: #fff; border-radius: 10px; padding: 10px 18px; font-weight: 700; text-decoration: none; font-size: 14px; margin-top: 6px; }
+      .up-steps { font-size: 12px; color: var(--muted); margin-top: 12px; }
     </style>
   </head>
   <body>
@@ -967,6 +999,16 @@
             <svg viewBox="0 0 24 24"><path d="M12 3v10.5l3.5-3.5L17 11.5l-5 5-5-5L8.5 10 12 13.5V3zM5 19h14v2H5z"/></svg>
             <span>Export Markdown</span>
           </button>
+          <div class="menu-sep"></div>
+          <button class="menu-item" id="feedbackBtn">
+            <svg viewBox="0 0 24 24"><path d="M4 4h16a1 1 0 011 1v12a1 1 0 01-1 1H8l-4 4V5a1 1 0 011-1zm3 5v2h10V9H7zm0 4v2h7v-2H7z"/></svg>
+            <span>Send feedback</span>
+          </button>
+          <button class="menu-item" id="updateBtn">
+            <svg viewBox="0 0 24 24"><path d="M17.65 6.35A8 8 0 104 12h2a6 6 0 1110.24-4.24L13 11h7V4z"/></svg>
+            <span>Check for updates</span>
+          </button>
+          <div class="menu-version" id="menuVersion"></div>
         </div>
       </div>
     </div>

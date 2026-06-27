@@ -3067,4 +3067,115 @@ document.addEventListener("click", (e) => {
   if (!e.target.closest(".menu-wrap")) moreMenu.classList.remove("open");
 });
 
+// ---- feedback (SuperFeedback) + updates (GitHub Releases) -------------------
+const GH_REPO = "lman80/shorts-scout-chrome-extension";
+const SF_BACKEND = "https://superfeedback.ashton-mcp-worker.workers.dev";
+const APP_VERSION = (() => {
+  try { return (IS_EXTENSION && chrome.runtime && chrome.runtime.getManifest) ? chrome.runtime.getManifest().version : "1.1.0"; }
+  catch (e) { return "1.1.0"; }
+})();
+
+function closeModalEl(el) { if (el) el.remove(); }
+function openFeedback() {
+  const old = document.getElementById("sfModal"); if (old) old.remove();
+  const modal = document.createElement("div");
+  modal.id = "sfModal"; modal.className = "sf-modal";
+  modal.innerHTML = `
+    <div class="sf-box">
+      <div class="sf-head">💬 Send feedback <button class="sf-x" title="Close">✕</button></div>
+      <div class="sf-types">
+        <button class="sf-type on" data-type="bug">🐛 Bug</button>
+        <button class="sf-type" data-type="feature">✨ Idea</button>
+        <button class="sf-type" data-type="other">💬 Other</button>
+      </div>
+      <textarea class="sf-msg" placeholder="What's broken, or what would make this better? The more detail the better."></textarea>
+      <button type="button" class="sf-attach">📎 Attach a screenshot / image (optional)</button>
+      <input type="file" accept="image/*" class="sf-file" hidden>
+      <div class="sf-thumb" hidden></div>
+      <div class="sf-foot"><span class="sf-status"></span><button class="sf-send">Send</button></div>
+      <div class="sf-note">Goes straight to the developer as a GitHub issue. Your name isn't attached.</div>
+    </div>`;
+  document.body.appendChild(modal);
+  let type = "bug", imgData = null;
+  const status = modal.querySelector(".sf-status");
+  const thumb = modal.querySelector(".sf-thumb");
+  const fileInput = modal.querySelector(".sf-file");
+  const setImg = (data) => {
+    imgData = data;
+    if (!data) { thumb.hidden = true; thumb.innerHTML = ""; return; }
+    thumb.hidden = false;
+    thumb.innerHTML = `<img src="${data}"><button class="sf-imgx" title="Remove">✕</button>`;
+    thumb.querySelector(".sf-imgx").onclick = () => setImg(null);
+  };
+  const readFile = (f) => { if (!f) return; const r = new FileReader(); r.onload = () => setImg(r.result); r.readAsDataURL(f); };
+  modal.querySelector(".sf-x").onclick = () => modal.remove();
+  modal.onclick = (e) => { if (e.target === modal) modal.remove(); };
+  modal.querySelectorAll(".sf-type").forEach((b) => (b.onclick = () => {
+    modal.querySelectorAll(".sf-type").forEach((x) => x.classList.remove("on"));
+    b.classList.add("on"); type = b.dataset.type;
+  }));
+  modal.querySelector(".sf-attach").onclick = () => fileInput.click();
+  fileInput.onchange = () => readFile(fileInput.files && fileInput.files[0]);
+  modal.querySelector(".sf-msg").addEventListener("paste", (e) => {
+    const items = (e.clipboardData || {}).items || [];
+    for (const it of items) if (it.type && it.type.indexOf("image") === 0) { readFile(it.getAsFile()); break; }
+  });
+  const send = modal.querySelector(".sf-send");
+  send.onclick = () => {
+    const msg = modal.querySelector(".sf-msg").value.trim();
+    if (!msg) { status.textContent = "Type a message first."; return; }
+    send.disabled = true; status.textContent = "Sending…";
+    const body = {
+      repo: GH_REPO, app: "Shorts Scout", type: type, message: msg,
+      meta: { appVersion: APP_VERSION, platform: navigator.platform || "", url: location.href, surface: IS_EXTENSION ? "extension" : "website", user: activeProfile().name },
+    };
+    if (imgData) body.images = [imgData];
+    fetch(SF_BACKEND + "/report", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(body) })
+      .then((r) => r.json())
+      .then((j) => {
+        if (j && j.ok) { status.innerHTML = `✓ Thanks! Tracked <a href="${esc(j.url)}" target="_blank" rel="noopener">here ↗</a>`; setTimeout(() => modal.remove(), 2600); }
+        else { status.textContent = "Couldn't send: " + ((j && j.error) || "unknown"); send.disabled = false; }
+      })
+      .catch(() => { status.textContent = "Network error — please try again."; send.disabled = false; });
+  };
+  setTimeout(() => modal.querySelector(".sf-msg").focus(), 50);
+}
+
+function verParts(v) { return String(v || "").replace(/^v/i, "").split(".").map((n) => parseInt(n, 10) || 0); }
+function isNewer(a, b) { const A = verParts(a), B = verParts(b); for (let i = 0; i < Math.max(A.length, B.length); i++) { const x = A[i] || 0, y = B[i] || 0; if (x > y) return true; if (x < y) return false; } return false; }
+function checkUpdates() {
+  const old = document.getElementById("upModal"); if (old) old.remove();
+  const modal = document.createElement("div");
+  modal.id = "upModal"; modal.className = "sf-modal";
+  modal.innerHTML = `<div class="sf-box"><div class="sf-head">⟳ Updates <button class="sf-x">✕</button></div><div class="up-body">Checking…</div></div>`;
+  document.body.appendChild(modal);
+  modal.querySelector(".sf-x").onclick = () => modal.remove();
+  modal.onclick = (e) => { if (e.target === modal) modal.remove(); };
+  const bodyEl = modal.querySelector(".up-body");
+  fetch("https://api.github.com/repos/" + GH_REPO + "/releases/latest", { headers: { Accept: "application/vnd.github+json" } })
+    .then((r) => { if (r.status === 404) return null; if (!r.ok) throw new Error(String(r.status)); return r.json(); })
+    .then((rel) => {
+      if (!rel) { bodyEl.innerHTML = `<p>No releases published yet. You're on <b>v${esc(APP_VERSION)}</b>.</p>`; return; }
+      const latest = rel.tag_name || rel.name || "";
+      const notes = (rel.body || "").trim();
+      if (isNewer(latest, APP_VERSION)) {
+        bodyEl.innerHTML = `<p class="up-new">⬆ Update available: <b>${esc(latest)}</b> &nbsp;<span class="up-dim">(you have v${esc(APP_VERSION)})</span></p>
+          ${notes ? `<div class="up-notes">${esc(notes).slice(0, 700)}</div>` : ""}
+          <a class="up-getbtn" href="${esc(rel.html_url)}" target="_blank" rel="noopener">⬇ Download the update</a>
+          <div class="up-steps">${IS_EXTENSION
+            ? "Then: unzip it, go to <b>chrome://extensions</b>, and click the ↻ on Shorts Scout (or remove it and “Load unpacked” the new folder)."
+            : "The website updates itself — just refresh this page."}</div>`;
+      } else {
+        bodyEl.innerHTML = `<p class="up-ok">✓ You're up to date — <b>v${esc(APP_VERSION)}</b> is the latest.</p>`;
+      }
+    })
+    .catch(() => { bodyEl.innerHTML = `<p>Couldn't check right now (network or GitHub rate limit). You're on <b>v${esc(APP_VERSION)}</b>.</p>`; });
+}
+
+(function wireExtras() {
+  const fb = document.getElementById("feedbackBtn"); if (fb) fb.onclick = openFeedback;
+  const up = document.getElementById("updateBtn"); if (up) up.onclick = checkUpdates;
+  const mv = document.getElementById("menuVersion"); if (mv) mv.textContent = "Shorts Scout · v" + APP_VERSION;
+})();
+
 load();
