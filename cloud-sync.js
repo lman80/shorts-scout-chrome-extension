@@ -23,7 +23,8 @@
   var BASE = "https://firestore.googleapis.com/v1/projects/" + PROJECT +
              "/databases/(default)/documents/boards/";
   function docUrl(id) { return BASE + encodeURIComponent(id); }
-  var REG_ID = "__index__"; // registry doc listing all boards (users)
+  var REG_ID = "registry"; // registry doc listing all boards (users). NOTE: ids like
+                            // __index__ are RESERVED in Firestore and 400 — keep this plain.
 
   // Keys that mirror between extension <-> website. Must match cloud-app.js.
   // (activeBoard + boardProfiles are NOT here — they are not part of a board.)
@@ -183,23 +184,36 @@
   function syncRegistry() {
     return fetchRegistry().then(function (profiles) {
       if (!profiles || !profiles.length) {
-        var seed = [{ id: "shared", name: "Team" }];
+        var seed = [{ id: "shared", name: "Ashton" }, { id: "team", name: "Team" }];
         return pushProfiles(seed).then(function () { return localSet({ boardProfiles: seed }); });
       }
-      if (!profiles.some(function (p) { return p.id === "shared"; })) profiles.unshift({ id: "shared", name: "Team" });
-      return localSet({ boardProfiles: profiles });
+      if (!profiles.some(function (p) { return p.id === "shared"; })) profiles.unshift({ id: "shared", name: "Ashton" });
+      return localSet({ boardProfiles: profiles }).then(function () {
+        // Recover a dangling active board (e.g. a deleted user) -> back to the main board.
+        return localGet(["activeBoard"]).then(function (d) {
+          var a = d.activeBoard || "shared";
+          if (!profiles.some(function (p) { return p.id === a; })) return localSet({ activeBoard: "shared" });
+        });
+      });
     }).catch(function (e) { console.warn("[cloud-sync] registry", e); });
   }
 
   // ---- switch board --------------------------------------------------------
+  // Atomic: flush the current board, fetch the target, REPLACE local with the
+  // target's data (resetting every key — a new board loads EMPTY), and only then
+  // commit `activeBoard`. `switching` stays true the whole time so no stray push
+  // ever writes one board's data into another. If the fetch fails, nothing changes.
   function switchBoard(to) {
     switching = true;
-    return pushNow_force()                                  // flush the CURRENT board first (data safety)
-      .then(function () { return localSet({ activeBoard: to }); })
-      .then(function () { return fetchDoc(to); })
-      .then(function (remote) { switching = false; return loadBoardIntoLocal(remote); })
+    return pushNow_force()                                  // 1. flush current board -> its own doc
+      .then(function () { return fetchDoc(to); })           // 2. fetch the target board
+      .then(function (remote) {
+        return loadBoardIntoLocal(remote)                   // 3. local := target data (empties for a new board)
+          .then(function () { return localSet({ activeBoard: to }); }); // 4. commit active LAST
+      })
       .then(function () { return syncRegistry(); })
-      .catch(function (e) { switching = false; console.warn("[cloud-sync] switch failed", e); });
+      .then(function () { switching = false; })             // 5. release the guard only when fully done
+      .catch(function (e) { switching = false; console.warn("[cloud-sync] switch failed", e); throw e; });
   }
   // Like pushNow but bypasses the `switching` guard (used at the start of a switch).
   function pushNow_force() {
@@ -243,7 +257,7 @@
   chrome.runtime.onMessage.addListener(function (msg, sender, sendResponse) {
     if (!msg) return;
     if (msg.type === "CLOUD_SYNC") { sync().then(function () { sendResponse({ ok: true }); }); return true; }
-    if (msg.type === "SWITCH_BOARD") { switchBoard(msg.to).then(function () { sendResponse({ ok: true }); }); return true; }
+    if (msg.type === "SWITCH_BOARD") { switchBoard(msg.to).then(function () { sendResponse({ ok: true }); }, function () { sendResponse({ ok: false }); }); return true; }
     if (msg.type === "SAVE_PROFILES") {
       localSet({ boardProfiles: msg.profiles })
         .then(function () { return pushProfiles(msg.profiles); })

@@ -720,12 +720,24 @@
   function renderError(message) {
     if (message === "NO_API_KEY") {
       shell(`
-        <p class="ssct-warn">No API key set.</p>
-        <p class="ssct-muted">Click the Shorts Scout toolbar icon, paste your free
-        YouTube Data API key, and Save — then try again.</p>`);
-    } else {
-      shell(`<p class="ssct-warn">${message}</p>`);
+        <p class="ssct-warn">Add your free YouTube API key</p>
+        <input id="ssct-keyinput" class="ssct-keyinput" type="text" placeholder="Paste your YouTube Data API v3 key">
+        <button class="ssct-keysave" id="ssct-keysave">Save key</button>
+        <p class="ssct-muted">Free from Google Cloud (enable “YouTube Data API v3” → Credentials → API key). Stored on this device only.</p>`);
+      const inp = panel.querySelector("#ssct-keyinput");
+      const btn = panel.querySelector("#ssct-keysave");
+      const saveKey = () => {
+        const k = (inp.value || "").trim();
+        if (!k) { inp.focus(); return; }
+        btn.textContent = "Saving…"; btn.disabled = true;
+        chrome.storage.sync.set({ apiKey: k }, () => { scheduleQuick(); });
+      };
+      if (btn) btn.onclick = saveKey;
+      if (inp) inp.onkeydown = (e) => { if (e.key === "Enter") saveKey(); };
+      panel.style.display = "block";
+      return;
     }
+    shell(`<p class="ssct-warn">${message}</p>`);
     panel.style.display = "block";
   }
 

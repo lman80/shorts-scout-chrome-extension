@@ -3071,8 +3071,8 @@ document.addEventListener("click", (e) => {
 const GH_REPO = "lman80/shorts-scout-chrome-extension";
 const SF_BACKEND = "https://superfeedback.ashton-mcp-worker.workers.dev";
 const APP_VERSION = (() => {
-  try { return (IS_EXTENSION && chrome.runtime && chrome.runtime.getManifest) ? chrome.runtime.getManifest().version : "1.1.0"; }
-  catch (e) { return "1.1.0"; }
+  try { return (IS_EXTENSION && chrome.runtime && chrome.runtime.getManifest) ? chrome.runtime.getManifest().version : "1.1.1"; }
+  catch (e) { return "1.1.1"; }
 })();
 
 function closeModalEl(el) { if (el) el.remove(); }
@@ -3172,10 +3172,42 @@ function checkUpdates() {
     .catch(() => { bodyEl.innerHTML = `<p>Couldn't check right now (network or GitHub rate limit). You're on <b>v${esc(APP_VERSION)}</b>.</p>`; });
 }
 
+// ---- API key entry (the toolbar icon now opens this board, so the key is set here) ----
+function getStoredApiKey(cb) {
+  try {
+    if (IS_EXTENSION && chrome.storage.sync) chrome.storage.sync.get(["apiKey"], (d) => cb((d && d.apiKey) || ""));
+    else chrome.storage.local.get(["apiKey"], (d) => cb((d && d.apiKey) || ""));
+  } catch (e) { cb(""); }
+}
+function setStoredApiKey(key, cb) {
+  try {
+    if (IS_EXTENSION && chrome.storage.sync) chrome.storage.sync.set({ apiKey: key }, cb);
+    else chrome.storage.local.set({ apiKey: key }, cb);
+  } catch (e) { cb && cb(); }
+}
+function refreshApiBanner() {
+  const banner = document.getElementById("apiBanner");
+  if (!banner) return;
+  getStoredApiKey((k) => { banner.hidden = !!(k && String(k).trim()); });
+}
+function promptApiKey() {
+  getStoredApiKey((cur) => {
+    const k = prompt("Paste your free YouTube Data API v3 key.\n\nGet one free: console.cloud.google.com → enable “YouTube Data API v3” → Credentials → Create API key.\n(Stored on this device only.)", cur || "");
+    if (k == null) return;
+    setStoredApiKey(k.trim(), () => {
+      refreshApiBanner();
+      toast(k.trim() ? "API key saved ✓ — use Refresh stats to load views" : "API key cleared");
+    });
+  });
+}
+
 (function wireExtras() {
   const fb = document.getElementById("feedbackBtn"); if (fb) fb.onclick = openFeedback;
   const up = document.getElementById("updateBtn"); if (up) up.onclick = checkUpdates;
   const mv = document.getElementById("menuVersion"); if (mv) mv.textContent = "Shorts Scout · v" + APP_VERSION;
+  const apiBtn = document.getElementById("apiKeyBtn"); if (apiBtn) apiBtn.onclick = promptApiKey;
+  const apiBannerBtn = document.getElementById("apiBannerBtn"); if (apiBannerBtn) apiBannerBtn.onclick = promptApiKey;
+  refreshApiBanner();
 })();
 
 load();

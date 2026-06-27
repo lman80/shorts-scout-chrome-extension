@@ -299,6 +299,34 @@
   color: #ff7a7a;
   font-weight: 600;
 }
+#ssct-panel .ssct-keyinput {
+  width: 100%;
+  margin: 10px 0 8px;
+  background: #1b1b1b;
+  border: 1px solid #2a2a2a;
+  color: #f1f1f1;
+  border-radius: 9px;
+  padding: 9px 11px;
+  font-size: 12.5px;
+  box-sizing: border-box;
+}
+#ssct-panel .ssct-keysave {
+  width: 100%;
+  background: #2563eb;
+  border: 0;
+  color: #fff;
+  border-radius: 9px;
+  padding: 9px;
+  font-size: 13px;
+  font-weight: 700;
+  cursor: pointer;
+}
+#ssct-panel .ssct-keysave:hover {
+  filter: brightness(1.08);
+}
+#ssct-panel .ssct-keysave:disabled {
+  opacity: 0.6;
+}
 #ssct-panel .ssct-link {
   display: block;
   text-align: center;

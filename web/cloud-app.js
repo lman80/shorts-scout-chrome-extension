@@ -27,7 +27,7 @@
   function getActiveBoard() { try { return JSON.parse(localStorage.getItem("ss_activeBoard")) || "shared"; } catch (e) { return "shared"; } }
   const ACTIVE = getActiveBoard();
   const DOC = db.collection("boards").doc(ACTIVE);   // the board we're viewing
-  const REG = db.collection("boards").doc("__index__"); // registry of all boards
+  const REG = db.collection("boards").doc("registry"); // registry of all boards (plain id; __index__ is reserved)
 
   let cloudData = {}; // mirrors chrome.storage.local
   const listeners = [];
@@ -283,12 +283,17 @@
     REG.onSnapshot((snap) => {
       const d = snap.data();
       if (!d || !Array.isArray(d.profiles) || !d.profiles.length) {
-        const seed = [{ id: "shared", name: "Team" }];
+        const seed = [{ id: "shared", name: "Ashton" }, { id: "team", name: "Team" }];
         applyRemote({ boardProfiles: seed });
         REG.set({ profiles: seed, _rev: Date.now() }, { merge: true }).catch(() => {});
         return;
       }
       applyRemote({ boardProfiles: d.profiles });
+      // Recover a dangling active board (e.g. a removed user) -> reload onto the main board.
+      if (!d.profiles.some((p) => p.id === ACTIVE) && ACTIVE !== "shared") {
+        localStorage.setItem("ss_activeBoard", JSON.stringify("shared"));
+        location.reload();
+      }
     }, (err) => console.warn("registry", err));
     DOC.onSnapshot((snap) => {
       if (snap.metadata.hasPendingWrites) return; // ignore our own writes
