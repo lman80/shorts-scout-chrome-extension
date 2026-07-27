@@ -1,5 +1,6 @@
 {
   "manifest_version": 3,
+  "key": "MIIBIjANBgkqhkiG9w0BAQEFAAOCAQ8AMIIBCgKCAQEAtzHfBuqo893CgKXpW4KW5NgtIlBUeJ+RjFXBKOB77VPfN8/okjUsTL2MX0f668cMM8kaD1OmWnAOEx/8sZsUxRvdZ4ZMen4enYpchg7NcR7oQY7gCnC275klh/d8UlAtTSMAxFo5vdPiQhId6FSvmERQi4y8Pr2j/XzzYCbTWPrdTFepsBn0D6QNZKKvHvlnWXzPGbexY0YbgKGP2h3Cv1sQwnSQOWqhCInex5kyL71iPPbWJsKRfmgXPS40iRvfRVY1IvhqyY/wem8TcH/APRYBU1u4t8x5tblZRb38VM3JahIC5JDoUrbrfhv3Dgq7+WxYC6qi74El/Xke4MlbTwIDAQAB",
   "name": "Shorts Scout — YouTube Shorts Research",
   "version": "1.1.2",
   "description": "While watching youtube.com/shorts, see the current short's total views and one-click scan the channel's total views, video count, and how many videos are over 1M / 10M.",

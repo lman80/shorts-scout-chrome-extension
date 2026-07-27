@@ -55,6 +55,12 @@ git add -A && git commit -m "..." && git push
 - `README.md` — end-user setup + install instructions
 
 ## Key facts
+- **Pinned extension ID:** `kneanlohejjephhacgcfikpdpfkoibom`. `manifest.json` carries a `key`
+  (RSA public key) so the ID no longer depends on the folder path. Without it, Chrome derives an
+  unpacked extension's ID from its absolute path, so **moving the folder created a brand-new
+  extension and orphaned all of `chrome.storage.local`** (this happened once; board data came back
+  from Firestore, the API key had to be re-entered). Do not remove or change the `key`. The matching
+  private key is `shorts-scout-key.pem` (gitignored, only needed to pack a `.crx`).
 - Needs a free **YouTube Data API v3** key (stored in `chrome.storage.sync`, never in code).
 - Watchlist (saved channels) is stored in `chrome.storage.local` under key `watchlist`
   (array of `{channelId, title, totalViews, subscribers, videoCount, addedAt, refreshedAt,
