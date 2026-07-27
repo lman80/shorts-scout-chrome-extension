@@ -4,6 +4,11 @@
     <meta charset="utf-8" />
     <title>Shorts Scout — Watchlist</title>
     <style>
+      /* Rules like `.api-banner { display: flex }` outrank the UA's `[hidden] { display: none }`,
+         which silently pins `hidden` elements open (the API-key + update banners never went away).
+         Keep this first so `el.hidden = true` always means hidden. */
+      [hidden] { display: none !important; }
+
       :root {
         --bg: #0a0a0b;
         --bg2: #0f0f11;
